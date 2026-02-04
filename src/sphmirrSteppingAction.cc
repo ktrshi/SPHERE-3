@@ -1,4 +1,5 @@
 #include "sphmirrSteppingAction.hh"
+#include "sphmirrCounters.hh"
 #include "sphmirrDetectorConstruction.hh"
 #include "sphmirrEventAction.hh"
 #include "G4SteppingManager.hh"
@@ -13,6 +14,7 @@
 #include "G4RunManager.hh"
 #include "G4UImanager.hh"
 #include "G4SystemOfUnits.hh"
+#include <algorithm>
 
 extern std::ofstream moshits;
 [[maybe_unused]] extern G4int DirGrp;
@@ -43,7 +45,7 @@ sphmirrSteppingAction::~sphmirrSteppingAction() = default;
 
 void sphmirrSteppingAction::InitializePixelCache() {
     // Precompute normalized vectors for all 2653 pixels to avoid sqrt in hot path
-    pixelCache.reserve(2653 * 7); // 2653 clusters * 7 pixels each
+    pixelCache.assign(2653, {});
     for (G4int cluster = 0; cluster < 379; cluster++) {
         for (G4int pixel = 0; pixel < 7; pixel++) {
             const G4int copyNo = cluster * 7 + pixel;
@@ -83,20 +85,26 @@ void sphmirrSteppingAction::UserSteppingAction(const G4Step *aStep) {
     const G4double x = thePostPoint->GetPosition().x();
     const G4double y = thePostPoint->GetPosition().y();
     if (const G4String PartName = aStep->GetTrack()->GetDefinition()->GetParticleName(); PartName == "opticalphoton") {
-        if ((thePostPVname == "PMT") && (dirz < 0.0)) {
+        if (thePostPVname == "PMT") {
             const G4TouchableHandle theTouchable = thePostPoint->GetTouchableHandle();
             const G4int copyNo = theTouchable->GetCopyNumber();
+            const auto& cache = pixelCache[copyNo];
+            // Check photon travels toward PMT face using local pixel normal
+            const G4double dot = cache.u * dirx + cache.v * diry + cache.w * dirz;
+            if (dot < 0.0) {
             const G4double glt = fTrack->GetGlobalTime();
             if (tmin > glt) tmin = glt;
             if (tmax < glt) tmax = glt;
+            if (tminAll > glt) tminAll = glt;
+            if (tmaxAll < glt) tmaxAll = glt;
             const G4int cluster_num = copyNo / 7;
             if (const G4int pix_num = copyNo - 7 * cluster_num; (pix_num < 7) && (cluster_num < 379)) {
-                // Use precomputed normalized vector from cache instead of sqrt
-                const auto& cache = pixelCache[copyNo];
-                const G4double pp = -(cache.u * dirx + cache.v * diry + cache.w * dirz);
-                if (const G4double sens = pow(pp, p1); G4UniformRand() < sens) {     //  photon is detected (phel produced)
+                // Clamp projection to [0,1] for sensitivity calculation
+                const G4double pp = std::clamp(-dot, 0.0, 1.0);
+                if (pp > 0.0 && G4UniformRand() < pow(pp, p1)) {     //  photon is detected (phel produced)
                     // Initial detection
                     NEntry++;
+                    NEntryTotal++;
                     moshits << std::setw(5) << cluster_num << std::setw(5) << pix_num
                             << std::setw(14) << x / m << std::setw(14) << y / m
                             << std::setw(14) << z / m << std::setw(14) << glt / ns
@@ -104,26 +112,32 @@ void sphmirrSteppingAction::UserSteppingAction(const G4Step *aStep) {
                             << std::setw(14) << dirz << std::setw(5) << origin
                             << std::setw(5) << phl_ii << std::setw(5) << phl_jj << std::setw(5) << phl_kk
                             << std::setw(14) << phl_xx << std::setw(14) << phl_yy << std::setw(14) << phl_t0
-                            << G4endl;
+                            << '\n';
 
-                    // Crosstalk simulation: neighboring tube fired with 7% probability
-                    // Use geometric distribution for multiple firings
+                    // Crosstalk simulation: each of 6 neighbors fires independently with 7% probability
+                    // Electronic crosstalk — no angular sensitivity filter applied
                     constexpr G4double crosstalk_prob = 0.07;
-                    while (G4UniformRand() < crosstalk_prob) {
-                        NEntry++;
-                        moshits << std::setw(5) << cluster_num << std::setw(5) << pix_num
-                                << std::setw(14) << x / m << std::setw(14) << y / m
-                                << std::setw(14) << z / m << std::setw(14) << glt / ns
-                                << std::setw(14) << dirx << std::setw(14) << diry
-                                << std::setw(14) << dirz << std::setw(5) << origin
-                                << std::setw(5) << phl_ii << std::setw(5) << phl_jj << std::setw(5) << phl_kk
-                                << std::setw(14) << phl_xx << std::setw(14) << phl_yy << std::setw(14) << phl_t0
-                                << G4endl;
+                    for (int n = 1; n <= 6; n++) {
+                        if (G4UniformRand() < crosstalk_prob) {
+                            const G4int neighbor_pix = (pix_num + n) % 7;
+                            NEntry++;
+                            NEntryTotal++;
+                            moshits << std::setw(5) << cluster_num << std::setw(5) << neighbor_pix
+                                    << std::setw(14) << x / m << std::setw(14) << y / m
+                                    << std::setw(14) << z / m << std::setw(14) << glt / ns
+                                    << std::setw(14) << dirx << std::setw(14) << diry
+                                    << std::setw(14) << dirz << std::setw(5) << origin
+                                    << std::setw(5) << phl_ii << std::setw(5) << phl_jj << std::setw(5) << phl_kk
+                                    << std::setw(14) << phl_xx << std::setw(14) << phl_yy << std::setw(14) << phl_t0
+                                    << '\n';
+                        }
                     }
                 }
             } else {
             }
             TotPhot++;
+            TotPhotTotal++;
+            }
         }
     }
 }
