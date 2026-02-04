@@ -8,13 +8,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # -march=native: Optimize for the local CPU architecture
 # -DNDEBUG: Disable assertions for release builds
 # -flto: Link-Time Optimization for cross-module optimizations
-# -ffast-math: Fast floating point operations (safe for physics simulations)
 # -funroll-loops: Unroll loops for better performance
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG -flto -ffast-math -funroll-loops")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG -flto -funroll-loops")
 set(CMAKE_EXE_LINKER_FLAGS_RELEASE "-flto")
 
 #set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_BUILD_TYPE Release)
+#set(CMAKE_BUILD_TYPE Release)
 
 #----------------------------------------------------------------------------
 # Find Geant4 package, activating all available UI and Vis drivers by default
