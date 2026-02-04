@@ -5,6 +5,8 @@
 #include "G4ParticleTypes.hh"
 #include "G4ProcessManager.hh"
 #include "G4OpBoundaryProcess.hh"
+#include "G4OpAbsorption.hh"
+#include "G4OpRayleigh.hh"
 #include "G4Decay.hh"
 #include "G4ComptonScattering.hh"
 #include "G4GammaConversion.hh"
@@ -128,6 +130,8 @@ void sphmirrPhysicsList::ConstructOp() {
         if (G4String particleName = particle->GetParticleName(); particleName == "opticalphoton") {
             G4cout << " AddDiscreteProcess to OpticalPhoton " << G4endl;
             pmanager->AddDiscreteProcess(theBoundaryProcess);
+            pmanager->AddDiscreteProcess(new G4OpAbsorption());
+            pmanager->AddDiscreteProcess(new G4OpRayleigh());
         }
     }
 }
