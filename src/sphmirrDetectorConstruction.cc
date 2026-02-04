@@ -192,15 +192,15 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
         auto rotm_alt_ptr = rotm_alt.get();
         rotationMatrixCache.push_back(std::move(rotm_alt));
 
-        // Create positions
-        const auto pos_pmt = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i]);
-        const auto pos_col = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i] + 0.1 * mm);
-        const auto pos_shield = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i] + 2.0 * mm);
+        // Convert to mosaic-local coordinates
+        const auto pos_pmt_local = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i]) - p;
+        const auto pos_col_local = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i] + 0.1 * mm) - p;
+        const auto pos_shield_local = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i] + 2.0 * mm) - p;
 
-        // Place volumes using cached rotation matrices
-        sphpmt_phys = new G4PVPlacement(rotm_ptr, pos_pmt, sphpmt_log, "PMT", expHall_log, false, i);
-        [[maybe_unused]] auto sphpmtcol_phys = new G4PVPlacement(rotm_ptr, pos_col, sphpmtcol_log, "Collector", expHall_log, false, i);
-        [[maybe_unused]] auto sphpmt_tube_phys = new G4PVPlacement(rotm_alt_ptr, pos_shield, shell_log, "Shield", expHall_log, false, i);
+        // Place as children of mosaic volume
+        sphpmt_phys = new G4PVPlacement(rotm_ptr, pos_pmt_local, sphpmt_log, "PMT", sphmos_log, false, i, true);
+        [[maybe_unused]] auto sphpmtcol_phys = new G4PVPlacement(rotm_ptr, pos_col_local, sphpmtcol_log, "Collector", sphmos_log, false, i, true);
+        [[maybe_unused]] auto sphpmt_tube_phys = new G4PVPlacement(rotm_alt_ptr, pos_shield_local, shell_log, "Shield", sphmos_log, false, i, true);
     }
 // hood
     auto *cam_hood = new G4Tubs("Hood", hood_r, hood_R, hood_hz,
