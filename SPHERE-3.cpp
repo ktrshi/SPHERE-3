@@ -11,13 +11,18 @@
 #include "sphmirrEventAction.hh"
 #include "sphmirrStackingAction.hh"
 #include "sphmirrSteppingAction.hh"
-#include "sphmirrSteppingVerbose.hh"
 #include "G4SystemOfUnits.hh"
 #include "ini.h"
 #include "G4VisExecutive.hh"
 #include "G4UIExecutive.hh"
 #include "G4UImanager.hh"
 
+// ==========================================================================
+// WARNING: Global mutable state below. NOT thread-safe.
+// Current code uses G4RunManager (single-threaded). If migrating to
+// G4MTRunManager, all counters (TotPhot, NEntry, tmin, tmax, etc.)
+// and the moshits ofstream must be protected with G4Accumulable or mutex.
+// ==========================================================================
 std::ofstream moshits;
 std::ifstream inpho, names;
 [[maybe_unused]] G4int DirGrp;
@@ -88,16 +93,7 @@ int main(const int argc, char **argv) {
     }
     AbsolutePath = CurrentPath;
     G4cout << argc << G4endl << CurrentPath << G4endl;
-    [[maybe_unused]] G4int ii, jj, kk, mmm;    // photon indices
-    // names.open(CurrentPath + "/Names");
-    // names >> NameIn;
-    // names >> NameOut;
-    // names.close();
-    [[maybe_unused]] G4int i;
     NbOfEvents = std::numeric_limits<G4int>::max();
-    // User Verbose output class
-    G4VSteppingVerbose *verbosity = new sphmirrSteppingVerbose;
-    G4VSteppingVerbose::SetInstance(verbosity);
     // Run manager
     auto *runManager = new G4RunManager;
     // UserInitialization classes - mandatory
@@ -137,6 +133,5 @@ int main(const int argc, char **argv) {
     // delete visManager;
     if (NbOfEvents > 0) runManager->BeamOn(NbOfEvents);
     delete runManager;
-    delete verbosity;
     return 0;
 }
