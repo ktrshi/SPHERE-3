@@ -3,6 +3,7 @@
 #include <string>
 #include <unistd.h>
 #include <filesystem>
+#include <limits>
 #include "sphmirrPhysicsList.hh"
 #include "sphmirrPrimaryGeneratorAction.hh"
 #include "sphmirrDetectorConstruction.hh"
@@ -62,21 +63,20 @@ int main(const int argc, char **argv) {
     // Seed the random number generator manually
     constexpr G4long myseed = 3453544;
     CLHEP::HepRandom::setTheSeed(myseed);
-    if (argc > 1)
-    {
+    if (argc > 1) {
         CurrentPath = argv[1];
+    } else {
+        CurrentPath = std::filesystem::path(argv[0]).parent_path().string();
     }
-    else
-    {
-        CurrentPath = argv[0];
-    }
-    CurrentPath = "/Users/vladimirivanov/Projects/SPHERE/SPHERE-3_G4/";
     phelsDir = CurrentPath + "/phels";
     const mINI::INIFile file("input.ini");
     mINI::INIStructure ini;
     file.read(ini);
     Height = ini.get("DEFAULT").get("Height");
-    Height = "500";
+    if (Height.empty()) {
+        Height = "500";
+        G4cout << "WARNING: Height not found in input.ini, using default 500" << G4endl;
+    }
     for (const auto &entry : std::filesystem::directory_iterator(phelsDir)) {
         if (entry.is_regular_file()) {
             fileList.push_back(entry.path().filename().string());
@@ -86,8 +86,7 @@ int main(const int argc, char **argv) {
     for (const auto &f : fileList) {
         std::cout << f << std::endl;
     }
-    // AbsolutePath = "/home/common/SPHERE-3_G4";
-    AbsolutePath = "/Users/vladimirivanov/Projects/SPHERE/SPHERE-3_G4/";
+    AbsolutePath = CurrentPath;
     G4cout << argc << G4endl << CurrentPath << G4endl;
     [[maybe_unused]] G4int ii, jj, kk, mmm;    // photon indices
     // names.open(CurrentPath + "/Names");
@@ -95,7 +94,7 @@ int main(const int argc, char **argv) {
     // names >> NameOut;
     // names.close();
     [[maybe_unused]] G4int i;
-    NbOfEvents = 2000000000;
+    NbOfEvents = std::numeric_limits<G4int>::max();
     // User Verbose output class
     G4VSteppingVerbose *verbosity = new sphmirrSteppingVerbose;
     G4VSteppingVerbose::SetInstance(verbosity);
