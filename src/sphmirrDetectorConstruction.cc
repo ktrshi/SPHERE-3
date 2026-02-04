@@ -215,7 +215,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     visAttr = new G4VisAttributes(G4Colour(0.5, 0.5, 0.9));
     auto mesh_ = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/corrector_A-.stl");
     auto corout = mesh_->GetSolid();
-    cor_log = new G4LogicalVolume(corout, Acrylyl, "Сorrector");
+    cor_log = new G4LogicalVolume(corout, Acrylyl, "Corrector");
     cor_log->SetVisAttributes(visAttr);
     // cor_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, 0),
     //                              cor_log, "Corrector", expHall_log, false, 0);
