@@ -231,7 +231,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto *AirProperties = new G4MaterialPropertiesTable();
     AirProperties->AddProperty("RINDEX", Ephoton, RefrIndAir, num);
     Air->SetMaterialPropertiesTable(AirProperties);
-    G4double Refl[num] = {1.0, 1.0};
+    G4double Refl[num] = {0.88, 0.85};
     G4double Effi[num] = {0.0, 0.0};
     auto *sphmirrSurfProperties =
             new G4MaterialPropertiesTable();
