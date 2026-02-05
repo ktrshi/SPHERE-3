@@ -5,13 +5,14 @@
 #include "G4Material.hh"
 #include "G4Element.hh"
 #include "G4LogicalSkinSurface.hh"
+#include "G4LogicalBorderSurface.hh"
 #include "G4OpticalSurface.hh"
 #include "G4Tubs.hh"
 #include "G4ExtrudedSolid.hh"
 #include "G4OpBoundaryProcess.hh"
 #include "G4Box.hh"
 #include "G4Sphere.hh"
-#include "G4SubtractionSolid.hh"
+#include "G4IntersectionSolid.hh"
 #include "G4NistManager.hh"
 #include "G4LogicalVolume.hh"
 #include "G4PVPlacement.hh"
@@ -22,7 +23,6 @@
 #include "G4Colour.hh"
 #include "G4SystemOfUnits.hh"
 #include "CADMesh.hh"
-#include "G4Polyhedra.hh"
 
 [[maybe_unused]] extern G4double zdetshift, zmoscent, Rmos, zstart;
 [[maybe_unused]] extern G4double xpmt[379], ypmt[379], zpmt[379];   // PMT centers' coordinates, mm
@@ -65,8 +65,8 @@ sphmirrDetectorConstruction::sphmirrDetectorConstruction() {
     expHall_z = 4.0 * m;
     expHall_r = 2.0 * m;
     sphmirr_z = 1751.41 * mm;
-    sphmos_r = 86.25 * cm;
-    sphmos_R = 110.0 * cm;
+    sphmos_r = 83.25 * cm;
+    sphmos_R = 85.83 * cm;
     sphmos_z = 971.41 * mm;
     hood_r = 850 * mm;
     hood_R = 900 * mm;
@@ -101,107 +101,66 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
                                 0.0 * degree, 21.0 * degree);
     auto extent = SphMos->GetExtent();
     sphmos_log = new G4LogicalVolume(SphMos, Al, "Mosaic");
-    auto p = G4ThreeVector(0.0, 0.0, sphmos_z - sphmos_R - 1.5*cm);
+    constexpr G4double pixel_sphere_R = 86.25 * cm;  // radius of best-fit sphere through pixel positions
+    auto p = G4ThreeVector(0.0, 0.0, sphmos_z - pixel_sphere_R);
     sphmos_phys = new G4PVPlacement(nullptr, p, sphmos_log, "Mosaic", expHall_log, false, 0);
-// The PMTs
-    auto sphpmtcol_mesh = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/collector_test.stl");
-    auto sphpmtcol_solid = sphpmtcol_mesh->GetSolid();
+// Collector geometry parameters
+    constexpr G4double collector_hex_radius = 6.0 * mm;
+    constexpr G4double collector_base_height = 4.0 * mm;
+    constexpr G4double collector_sphere_radius = 17.0 * mm;
+    constexpr G4double collector_sphere_center_z = -11.6 * mm;  // relative to PMT face
+    constexpr G4double pmt_half_z = 0.1 * mm;
+
+// CollectorBase: solid hexagonal prism
+    auto collector_base_solid = new G4ExtrudedSolid(
+        "CollectorBase",
+        makeHexagonVertices(collector_hex_radius),
+        collector_base_height / 2.0,
+        G4TwoVector(0, 0), 1.0,
+        G4TwoVector(0, 0), 1.0
+    );
     auto visAttrpmt = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
     auto visAttrpmm = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
     visAttr->SetVisibility(false);
-    auto sphpmtcol_log = new G4LogicalVolume(sphpmtcol_solid, Acrylyl, "Collector");
-    sphpmtcol_log->SetVisAttributes(visAttrpmt);
-    auto sphpmt_solid = new G4Box("PMT", 3 * mm, 3 * mm, 0.1 * mm);
+    auto collector_base_log = new G4LogicalVolume(collector_base_solid, Acrylyl, "CollectorBase");
+    collector_base_log->SetVisAttributes(visAttrpmt);
+
+// PMT
+    auto sphpmt_solid = new G4Box("PMT", 3 * mm, 3 * mm, pmt_half_z);
     sphpmt_log = new G4LogicalVolume(sphpmt_solid, C, "PMT");
-    sphpmt_log -> SetVisAttributes(visAttrpmm);
-    G4double outer_radius = 7.11*mm;
-    G4double inner_radius = 7.10*mm;
-    G4double height = 2.5*mm;
-    auto outer_hex = new G4ExtrudedSolid(
-    "OuterHex",
-    makeHexagonVertices(outer_radius),
-    height,
-    G4TwoVector(0,0), 1.0,
-    G4TwoVector(0,0), 1.0
+    sphpmt_log->SetVisAttributes(visAttrpmm);
+
+// CollectorLens: spherical cap (intersection of hemisphere with thin hex slab)
+    constexpr G4double cap_height = collector_sphere_radius + collector_sphere_center_z
+                                    - collector_base_height;  // 17 + (-11.6) - 4 = 1.4mm
+    constexpr G4double cap_half_height = cap_height / 2.0;    // 0.7mm
+    constexpr G4double cap_center_in_sphere = -collector_sphere_center_z
+                                              + collector_base_height
+                                              + cap_half_height;  // 11.6 + 4 + 0.7 = 16.3mm
+
+    auto collector_sphere = new G4Sphere(
+        "CollectorSphere",
+        0.0, collector_sphere_radius,
+        0.0, 360.0 * degree,
+        0.0, 90.0 * degree
     );
-    auto inner_hex = new G4ExtrudedSolid(
-        "InnerHex",
-        makeHexagonVertices(inner_radius),
-        height,
-        G4TwoVector(0,0), 1.0,
-        G4TwoVector(0,0), 1.0
+    auto collector_hex_slab = new G4ExtrudedSolid(
+        "CollectorHexSlab",
+        makeHexagonVertices(collector_hex_radius),
+        cap_half_height,
+        G4TwoVector(0, 0), 1.0,
+        G4TwoVector(0, 0), 1.0
     );
-    // Create the hollow shell by subtracting the inner from outer
-    auto hollow_hex = new G4SubtractionSolid(
-        "HollowHex",
-        outer_hex,    // Larger hexagon
-        inner_hex     // Smaller hexagon to subtract
+    auto collector_lens_solid = new G4IntersectionSolid(
+        "CollectorLens",
+        collector_sphere,
+        collector_hex_slab,
+        nullptr,
+        G4ThreeVector(0, 0, cap_center_in_sphere)
     );
-    auto shell_log = new G4LogicalVolume(
-    hollow_hex,
-    Al,
-    "CollectorShell"
-    );
-    shell_log->SetVisAttributes(visAttrpmt);
+    auto collector_lens_log = new G4LogicalVolume(collector_lens_solid, Acrylyl, "CollectorLens");
+    collector_lens_log->SetVisAttributes(visAttrpmt);
 
-    // Pre-allocate rotation matrices to avoid repeated allocations
-    rotationMatrixCache.reserve(2653 * 2);
-
-    for (G4int i = 0; i < 2653; i++) {
-    // for (i = 0; i < 7*7; i++) {
-        // Precompute trigonometric values
-        const G4double theta = -pix_theta[i];
-        const G4double phi = pix_phi[i];
-        const G4double cos_theta = cos(theta);
-        const G4double sin_theta = sin(theta);
-        const G4double cos_phi = cos(phi);
-        const G4double sin_phi = sin(phi);
-        const G4double ax = -cos_phi;
-        const G4double ay = sin_phi;
-        const G4double one_minus_cos_theta = 1.0 - cos_theta;
-        const G4double ax_sq = ax * ax;
-        const G4double ay_sq = ay * ay;
-        const G4double ax_ay = ax * ay;
-
-        // Build rotation matrix rows with precomputed values
-        const auto firstRow = G4ThreeVector(
-            cos_theta + one_minus_cos_theta * ax_sq,
-            one_minus_cos_theta * ax_ay,
-            sin_theta * ay
-        );
-        const auto secondRow = G4ThreeVector(
-            one_minus_cos_theta * ax_ay,
-            cos_theta + one_minus_cos_theta * ay_sq,
-            -sin_theta * ax
-        );
-        const auto thirdRow = G4ThreeVector(
-            -sin_theta * ay,
-            sin_theta * ax,
-            cos_theta
-        );
-
-        // Create and cache rotation matrices
-        auto rotm = std::make_unique<G4RotationMatrix>();
-        rotm->setRows(firstRow, secondRow, thirdRow);
-        auto rotm_ptr = rotm.get();
-        rotationMatrixCache.push_back(std::move(rotm));
-
-        auto rotm_alt = std::make_unique<G4RotationMatrix>();
-        rotm_alt->setRows(firstRow, secondRow, thirdRow);
-        rotm_alt->rotateZ(30*degree);
-        auto rotm_alt_ptr = rotm_alt.get();
-        rotationMatrixCache.push_back(std::move(rotm_alt));
-
-        // Convert to mosaic-local coordinates
-        const auto pos_pmt_local = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i]) - p;
-        const auto pos_col_local = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i] + 0.1 * mm) - p;
-        const auto pos_shield_local = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i] + 2.0 * mm) - p;
-
-        // Place as children of mosaic volume
-        sphpmt_phys = new G4PVPlacement(rotm_ptr, pos_pmt_local, sphpmt_log, "PMT", sphmos_log, false, i, true);
-        [[maybe_unused]] auto sphpmtcol_phys = new G4PVPlacement(rotm_ptr, pos_col_local, sphpmtcol_log, "Collector", sphmos_log, false, i, true);
-        [[maybe_unused]] auto sphpmt_tube_phys = new G4PVPlacement(rotm_alt_ptr, pos_shield_local, shell_log, "Shield", sphmos_log, false, i, true);
-    }
 // hood
     auto *cam_hood = new G4Tubs("Hood", hood_r, hood_R, hood_hz,
                                 0.0, 6.283185307179586 * rad);
@@ -281,7 +240,24 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto *OpsphcorSurface = new G4OpticalSurface("sphcorSurfac", unified, polished, dielectric_dielectric);
     OpsphcorSurface->SetMaterialPropertiesTable(mpt);
     [[maybe_unused]] auto *sphcorSkinSurface = new G4LogicalSkinSurface("sphcorSkin", cor_log, OpsphcorSurface);
-    [[maybe_unused]] auto *sphpmtcolSkinSurface = new G4LogicalSkinSurface("sphcorSkin", sphpmtcol_log, OpsphcorSurface);
+//OpticalCollectorBaseSurface (absorbing skin — all faces by default)
+    G4double ReflBase[num] = {0.0, 0.0};
+    G4double EffiBase[num] = {0.0, 0.0};
+    auto *collectorBaseSurfProperties = new G4MaterialPropertiesTable();
+    collectorBaseSurfProperties->AddProperty("REFLECTIVITY", Ephoton, ReflBase, num);
+    collectorBaseSurfProperties->AddProperty("EFFICIENCY", Ephoton, EffiBase, num);
+    auto *OpCollectorBaseSurface = new G4OpticalSurface(
+        "CollectorBaseSurface", unified, polished, dielectric_metal);
+    OpCollectorBaseSurface->SetMaterialPropertiesTable(collectorBaseSurfProperties);
+    [[maybe_unused]] auto *collectorBaseSkinSurface =
+        new G4LogicalSkinSurface("CollectorBaseSkin", collector_base_log, OpCollectorBaseSurface);
+//OpticalCollectorLensSurface (transparent — Fresnel refraction)
+    [[maybe_unused]] auto *collectorLensSkinSurface =
+        new G4LogicalSkinSurface("CollectorLensSkin", collector_lens_log, OpsphcorSurface);
+//TransparentBorderSurface (for Lens<->Base transitions, overrides absorbing skin)
+    auto *OpTransparentSurface = new G4OpticalSurface(
+        "TransparentBorder", unified, polished, dielectric_dielectric);
+    OpTransparentSurface->SetMaterialPropertiesTable(mpt);
 //OpticalsphPMTSurface
     G4double Reflp[num] = {0.0, 0.0};
     G4double Effip[num] = {1.0, 1.0};
@@ -295,6 +271,84 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
             SetMaterialPropertiesTable(sphPMTSurfProperties);
     [[maybe_unused]] auto *sphPMTSkinSurface =
             new G4LogicalSkinSurface("sphPMTSkin", sphpmt_log, OpsphPMTSurface);
+
+// Place PMT once as daughter of CollectorBase (all instances inherit it)
+    auto pmt_phys = new G4PVPlacement(
+        nullptr,
+        G4ThreeVector(0, 0, -collector_base_height / 2.0 + pmt_half_z),
+        sphpmt_log, "PMT", collector_base_log, false, 0, true);
+
+// Place CollectorBase + CollectorLens for each pixel, with border surfaces
+    rotationMatrixCache.reserve(2653);
+
+    for (G4int i = 0; i < 2653; i++) {
+        const G4double theta = -pix_theta[i];
+        const G4double phi = pix_phi[i];
+        const G4double cos_theta = cos(theta);
+        const G4double sin_theta = sin(theta);
+        const G4double cos_phi = cos(phi);
+        const G4double sin_phi = sin(phi);
+        const G4double ax = -cos_phi;
+        const G4double ay = sin_phi;
+        const G4double one_minus_cos_theta = 1.0 - cos_theta;
+        const G4double ax_sq = ax * ax;
+        const G4double ay_sq = ay * ay;
+        const G4double ax_ay = ax * ay;
+
+        const auto firstRow = G4ThreeVector(
+            cos_theta + one_minus_cos_theta * ax_sq,
+            one_minus_cos_theta * ax_ay,
+            sin_theta * ay
+        );
+        const auto secondRow = G4ThreeVector(
+            one_minus_cos_theta * ax_ay,
+            cos_theta + one_minus_cos_theta * ay_sq,
+            -sin_theta * ax
+        );
+        const auto thirdRow = G4ThreeVector(
+            -sin_theta * ay,
+            sin_theta * ax,
+            cos_theta
+        );
+
+        auto rotm = std::make_unique<G4RotationMatrix>();
+        rotm->setRows(firstRow, secondRow, thirdRow);
+        auto rotm_ptr = rotm.get();
+        rotationMatrixCache.push_back(std::move(rotm));
+
+        // Outward normal direction in global frame = R^T * (0,0,1)
+        const G4ThreeVector outward_normal(
+            firstRow.z(),
+            secondRow.z(),
+            thirdRow.z()
+        );
+
+        // CollectorBase center: base bottom at mosaic surface (pixel position)
+        constexpr G4double base_center_offset = collector_base_height / 2.0;
+        const auto pos_base = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i])
+                              + base_center_offset * outward_normal;
+
+        // CollectorLens: sphere center at collector_sphere_center_z from PMT face
+        const auto pos_lens = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i])
+                              + collector_sphere_center_z * outward_normal;
+
+        auto collector_base_phys = new G4PVPlacement(
+            rotm_ptr, pos_base, collector_base_log, "CollectorBase",
+            expHall_log, false, i, true);
+
+        auto collector_lens_phys = new G4PVPlacement(
+            rotm_ptr, pos_lens, collector_lens_log, "CollectorLens",
+            expHall_log, false, i, true);
+
+        // Border surfaces override absorbing skin for allowed transitions
+        new G4LogicalBorderSurface("Lens2Base_" + std::to_string(i),
+            collector_lens_phys, collector_base_phys, OpTransparentSurface);
+        new G4LogicalBorderSurface("Base2Lens_" + std::to_string(i),
+            collector_base_phys, collector_lens_phys, OpTransparentSurface);
+        new G4LogicalBorderSurface("Base2PMT_" + std::to_string(i),
+            collector_base_phys, pmt_phys, OpsphPMTSurface);
+    }
+
     [[maybe_unused]] G4SDManager *SDman = G4SDManager::GetSDMpointer();
     return expHall_phys;
 }
