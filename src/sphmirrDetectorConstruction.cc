@@ -13,6 +13,7 @@
 #include "G4Box.hh"
 #include "G4Sphere.hh"
 #include "G4IntersectionSolid.hh"
+#include "G4UnionSolid.hh"
 #include "G4NistManager.hh"
 #include "G4LogicalVolume.hh"
 #include "G4PVPlacement.hh"
@@ -24,14 +25,9 @@
 #include "G4SystemOfUnits.hh"
 #include "CADMesh.hh"
 
-[[maybe_unused]] extern G4double zdetshift, zmoscent, Rmos, zstart;
-[[maybe_unused]] extern G4double xpmt[379], ypmt[379], zpmt[379];   // PMT centers' coordinates, mm
 extern G4String AbsolutePath;
-std::ifstream pixel_data;
-extern G4double rs[379], angles[379];     // segments
-extern G4double rc[7], anglec[7];
-extern G4double pix_x[2653], pix_y[2653], pix_z[2653]; // pixels' coordinates
-extern G4double pix_phi[2653], pix_theta[2653]; // pixels' angles// pixels in a segment
+static std::ifstream pixel_data;
+static G4double pix_phi[2653], pix_theta[2653]; // pixels' angles (file-scope, used only for placement)
 
 std::vector<G4TwoVector> makeHexagonVertices(const G4double radius) {
     std::vector<G4TwoVector> vertices;
@@ -55,9 +51,9 @@ sphmirrDetectorConstruction::sphmirrDetectorConstruction() {
     G4double x, y, z, phi, theta, tmp;
     while (pixel_data >> x >> y >> z >> tmp >> tmp >> tmp >> phi >> theta) {
         static G4int i = 0;
-        pix_x[i] = x * mm;
-        pix_y[i] = y * mm;
-        pix_z[i] = z * mm;
+        fPixX[i] = x * mm;
+        fPixY[i] = y * mm;
+        fPixZ[i] = z * mm;
         pix_phi[i] = phi * rad;
         pix_theta[i] = theta * rad;
         i++;
@@ -111,7 +107,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     constexpr G4double collector_sphere_center_z = -11.6 * mm;  // relative to PMT face
     constexpr G4double pmt_half_z = 0.1 * mm;
 
-// CollectorBase: solid hexagonal prism
+// CollectorBase: solid hexagonal prism (lower part of collector)
     auto collector_base_solid = new G4ExtrudedSolid(
         "CollectorBase",
         makeHexagonVertices(collector_hex_radius),
@@ -119,18 +115,8 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
         G4TwoVector(0, 0), 1.0,
         G4TwoVector(0, 0), 1.0
     );
-    auto visAttrpmt = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
-    auto visAttrpmm = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
-    visAttr->SetVisibility(false);
-    auto collector_base_log = new G4LogicalVolume(collector_base_solid, Acrylyl, "CollectorBase");
-    collector_base_log->SetVisAttributes(visAttrpmt);
 
-// PMT
-    auto sphpmt_solid = new G4Box("PMT", 3 * mm, 3 * mm, pmt_half_z);
-    sphpmt_log = new G4LogicalVolume(sphpmt_solid, C, "PMT");
-    sphpmt_log->SetVisAttributes(visAttrpmm);
-
-// CollectorLens: spherical cap (intersection of hemisphere with thin hex slab)
+// CollectorLens: spherical cap (upper part)
     constexpr G4double cap_height = collector_sphere_radius + collector_sphere_center_z
                                     - collector_base_height;  // 17 + (-11.6) - 4 = 1.4mm
     constexpr G4double cap_half_height = cap_height / 2.0;    // 0.7mm
@@ -158,8 +144,32 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
         nullptr,
         G4ThreeVector(0, 0, cap_center_in_sphere)
     );
-    auto collector_lens_log = new G4LogicalVolume(collector_lens_solid, Acrylyl, "CollectorLens");
-    collector_lens_log->SetVisAttributes(visAttrpmt);
+
+// Collector = UnionSolid(Base + Lens): single Acrylyl volume, no internal boundary
+    // Lens sphere center in base-local frame:
+    //   base top = +collector_base_height/2 = +2mm
+    //   lens cap bottom = cap_center_in_sphere - cap_half_height = 15.6mm from sphere center
+    //   sphere center z = base_top - lens_cap_bottom = 2.0 - 15.6 = -13.6mm
+    constexpr G4double sphere_center_z_in_base =
+        collector_base_height / 2.0 - (cap_center_in_sphere - cap_half_height);
+    auto collector_solid = new G4UnionSolid(
+        "Collector",
+        collector_base_solid,
+        collector_lens_solid,
+        nullptr,
+        G4ThreeVector(0, 0, sphere_center_z_in_base)
+    );
+
+    auto visAttrpmt = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
+    auto visAttrpmm = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
+    visAttr->SetVisibility(false);
+    auto collector_log = new G4LogicalVolume(collector_solid, Acrylyl, "Collector");
+    collector_log->SetVisAttributes(visAttrpmt);
+
+// PMT
+    auto sphpmt_solid = new G4Box("PMT", 3 * mm, 3 * mm, pmt_half_z);
+    sphpmt_log = new G4LogicalVolume(sphpmt_solid, C, "PMT");
+    sphpmt_log->SetVisAttributes(visAttrpmm);
 
 // hood
     auto *cam_hood = new G4Tubs("Hood", hood_r, hood_R, hood_hz,
@@ -181,7 +191,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto pos1 = G4ThreeVector(0.0 * cm, 0.0 * cm, 0);
     hood_phys = new G4PVPlacement(nullptr, pos1,
                                   hood_log, "Hood", expHall_log, false, 0);
-    zstart = -0.1 * cm;   // z-coordinate for photon start point
+    fZstart = -0.1 * cm;   // z-coordinate for photon start point
 //	------------- Surfaces --------------
     constexpr G4int num = 2;
     G4double Ephoton[num] = {1.500 * eV, 2.00 * eV};
@@ -240,24 +250,9 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto *OpsphcorSurface = new G4OpticalSurface("sphcorSurfac", unified, polished, dielectric_dielectric);
     OpsphcorSurface->SetMaterialPropertiesTable(mpt);
     [[maybe_unused]] auto *sphcorSkinSurface = new G4LogicalSkinSurface("sphcorSkin", cor_log, OpsphcorSurface);
-//OpticalCollectorBaseSurface (absorbing skin — all faces by default)
-    G4double ReflBase[num] = {0.0, 0.0};
-    G4double EffiBase[num] = {0.0, 0.0};
-    auto *collectorBaseSurfProperties = new G4MaterialPropertiesTable();
-    collectorBaseSurfProperties->AddProperty("REFLECTIVITY", Ephoton, ReflBase, num);
-    collectorBaseSurfProperties->AddProperty("EFFICIENCY", Ephoton, EffiBase, num);
-    auto *OpCollectorBaseSurface = new G4OpticalSurface(
-        "CollectorBaseSurface", unified, polished, dielectric_metal);
-    OpCollectorBaseSurface->SetMaterialPropertiesTable(collectorBaseSurfProperties);
-    [[maybe_unused]] auto *collectorBaseSkinSurface =
-        new G4LogicalSkinSurface("CollectorBaseSkin", collector_base_log, OpCollectorBaseSurface);
-//OpticalCollectorLensSurface (transparent — Fresnel refraction)
-    [[maybe_unused]] auto *collectorLensSkinSurface =
-        new G4LogicalSkinSurface("CollectorLensSkin", collector_lens_log, OpsphcorSurface);
-//TransparentBorderSurface (for Lens<->Base transitions, overrides absorbing skin)
-    auto *OpTransparentSurface = new G4OpticalSurface(
-        "TransparentBorder", unified, polished, dielectric_dielectric);
-    OpTransparentSurface->SetMaterialPropertiesTable(mpt);
+//OpticalCollectorSurface (transparent — Fresnel refraction at Air/Acrylyl boundary)
+    [[maybe_unused]] auto *collectorSkinSurface =
+        new G4LogicalSkinSurface("CollectorSkin", collector_log, OpsphcorSurface);
 //OpticalsphPMTSurface
     G4double Reflp[num] = {0.0, 0.0};
     G4double Effip[num] = {1.0, 1.0};
@@ -272,13 +267,13 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     [[maybe_unused]] auto *sphPMTSkinSurface =
             new G4LogicalSkinSurface("sphPMTSkin", sphpmt_log, OpsphPMTSurface);
 
-// Place PMT once as daughter of CollectorBase (all instances inherit it)
+// Place PMT once as daughter of Collector (all instances inherit it)
     auto pmt_phys = new G4PVPlacement(
         nullptr,
         G4ThreeVector(0, 0, -collector_base_height / 2.0 + pmt_half_z),
-        sphpmt_log, "PMT", collector_base_log, false, 0, true);
+        sphpmt_log, "PMT", collector_log, false, 0, true);
 
-// Place CollectorBase + CollectorLens for each pixel, with border surfaces
+// Place Collector for each pixel, with detecting border surface to PMT
     rotationMatrixCache.reserve(2653);
 
     for (G4int i = 0; i < 2653; i++) {
@@ -323,30 +318,18 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
             thirdRow.z()
         );
 
-        // CollectorBase center: base bottom at mosaic surface (pixel position)
+        // Collector center = base center (base bottom at pixel position)
         constexpr G4double base_center_offset = collector_base_height / 2.0;
-        const auto pos_base = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i])
-                              + base_center_offset * outward_normal;
+        const auto pos_collector = G4ThreeVector(fPixX[i], fPixY[i], fPixZ[i])
+                                   + base_center_offset * outward_normal;
 
-        // CollectorLens: sphere center at collector_sphere_center_z from PMT face
-        const auto pos_lens = G4ThreeVector(pix_x[i], pix_y[i], pix_z[i])
-                              + collector_sphere_center_z * outward_normal;
-
-        auto collector_base_phys = new G4PVPlacement(
-            rotm_ptr, pos_base, collector_base_log, "CollectorBase",
+        auto collector_phys = new G4PVPlacement(
+            rotm_ptr, pos_collector, collector_log, "Collector",
             expHall_log, false, i, true);
 
-        auto collector_lens_phys = new G4PVPlacement(
-            rotm_ptr, pos_lens, collector_lens_log, "CollectorLens",
-            expHall_log, false, i, true);
-
-        // Border surfaces override absorbing skin for allowed transitions
-        new G4LogicalBorderSurface("Lens2Base_" + std::to_string(i),
-            collector_lens_phys, collector_base_phys, OpTransparentSurface);
-        new G4LogicalBorderSurface("Base2Lens_" + std::to_string(i),
-            collector_base_phys, collector_lens_phys, OpTransparentSurface);
-        new G4LogicalBorderSurface("Base2PMT_" + std::to_string(i),
-            collector_base_phys, pmt_phys, OpsphPMTSurface);
+        // Detecting border surface: Collector → PMT (overrides transparent skin)
+        new G4LogicalBorderSurface("Collector2PMT_" + std::to_string(i),
+            collector_phys, pmt_phys, OpsphPMTSurface);
     }
 
     [[maybe_unused]] G4SDManager *SDman = G4SDManager::GetSDMpointer();

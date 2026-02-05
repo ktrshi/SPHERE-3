@@ -40,5 +40,19 @@ class sphmirrDetectorConstruction final : public G4VUserDetectorConstruction
     [[maybe_unused]] G4VPhysicalVolume* sphpmt_phys{};
     [[maybe_unused]] G4VPhysicalVolume* hood_phys{};
     [[maybe_unused]] G4VPhysicalVolume* cor_phys{};
+
+// --- Public const accessors for pixel geometry (MT-safe: read-only after Construct) ---
+public:
+    const G4double* GetPixX() const { return fPixX; }
+    const G4double* GetPixY() const { return fPixY; }
+    const G4double* GetPixZ() const { return fPixZ; }
+    G4double GetZstart() const { return fZstart; }
+    static constexpr G4int kNPixels = 2653;
+
+private:
+    G4double fPixX[2653]{};
+    G4double fPixY[2653]{};
+    G4double fPixZ[2653]{};
+    G4double fZstart{0.0};
 };
 #endif /*sphmirrDetectorConstruction_h*/

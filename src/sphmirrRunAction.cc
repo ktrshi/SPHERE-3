@@ -1,34 +1,42 @@
-#include "G4Timer.hh"
 #include "sphmirrRunAction.hh"
 #include "G4Run.hh"
-#include <iomanip>
-#include <fstream>
+#include "G4Timer.hh"
+#include "G4AccumulableManager.hh"
 #include "G4SystemOfUnits.hh"
-extern std::ofstream moshits;
-extern G4int TotPhot;             // total number of tracked photons that entered PMTs
-extern G4int NEntry;       // number of tracked photons that entered PMTs within the time window
-extern G4double tmin;      // minimum delay at mosaic, ns
-extern G4double tmax;      // maximum delay at mosaic, ns
-RunAction::RunAction()
-{
-    timer = new G4Timer;
+
+RunAction::RunAction() : fTimer(new G4Timer) {
+    auto* accMgr = G4AccumulableManager::Instance();
+    accMgr->Register(fTotPhotTotal);
+    accMgr->Register(fNEntryTotal);
+    accMgr->Register(fTminAll);
+    accMgr->Register(fTmaxAll);
 }
-RunAction::~RunAction()
-{
-    delete timer;
-}
-void RunAction::BeginOfRunAction(const G4Run* aRun)
-{
+
+RunAction::~RunAction() { delete fTimer; }
+
+void RunAction::BeginOfRunAction(const G4Run* aRun) {
     G4cout << "### Run " << aRun->GetRunID() << " start." << G4endl;
-    timer->Start();
+    G4AccumulableManager::Instance()->Reset();
+    fTimer->Start();
 }
-void RunAction::EndOfRunAction(const G4Run* aRun)
-{   
-    timer->Stop();
-    G4cout << "number of event = " << aRun->GetNumberOfEvent()
-           << " " << *timer << G4endl;
-    moshits.close();
-    G4cout << "    TotPhot = " <<  TotPhot << G4endl;
-    G4cout << "    NEntry = " <<  NEntry << G4endl;
-    G4cout << "    tmin=" <<  tmin/ns << "ns,  tmax=" <<  tmax/ns << "ns" << G4endl;
+
+void RunAction::EndOfRunAction(const G4Run* aRun) {
+    fTimer->Stop();
+
+    // Merge accumulables from all worker threads
+    G4AccumulableManager::Instance()->Merge();
+
+    G4cout << "### Run " << aRun->GetRunID() << " end. "
+           << aRun->GetNumberOfEvent() << " events. " << *fTimer << G4endl;
+
+    const G4int totPhot = fTotPhotTotal.GetValue();
+    const G4int nEntry  = fNEntryTotal.GetValue();
+    G4cout << "[All events] TotPhot = " << totPhot
+           << ", NEntry = " << nEntry << G4endl;
+    if (nEntry > 0) {
+        G4cout << "[All events] tmin = " << fTminAll.GetValue() / ns << " ns"
+               << ", tmax = " << fTmaxAll.GetValue() / ns << " ns" << G4endl;
+    } else {
+        G4cout << "[All events] tmin/tmax: n/a" << G4endl;
+    }
 }
