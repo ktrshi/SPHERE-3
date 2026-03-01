@@ -29,6 +29,7 @@ struct WorkerEventData {
     std::vector<PhotonMeta> photonMeta; // metadata per primary, indexed by trackID-1
 
     // --- Managed by EventAction ---
+    char iobuf[65536];             // I/O buffer for moshits stream
     std::ofstream moshits;
 
     // --- Per-event counters (reset in GeneratePrimaries) ---

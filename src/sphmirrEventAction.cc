@@ -4,8 +4,8 @@
 #include "G4Event.hh"
 #include "G4AccumulableManager.hh"
 #include "G4SystemOfUnits.hh"
-#include <filesystem>
 #include <limits>
+#include <cstdio>
 
 EventAction::EventAction(WorkerEventData* eventData, const SimConfig* config)
     : fEventData(eventData), fConfig(config) {}
@@ -23,14 +23,11 @@ void EventAction::EndOfEventAction(const G4Event* event) {
     // Skip empty events (no file was assigned)
     if (fEventData->inputFileSuffix.empty()) return;
 
-    // Open output file if not already open
-    // (GeneratePrimaries set the suffix; SteppingAction may or may not have opened it)
+    // Open output file if not already open (e.g. zero detections — still write header)
+    // Output directory is created by RunAction::BeginOfRunAction on master thread
     if (!fEventData->moshits.is_open()) {
-        const std::string outputDir = fConfig->outputDir;
-        if (!std::filesystem::exists(outputDir)) {
-            std::filesystem::create_directories(outputDir);
-        }
-        const std::string path = outputDir + "/moshits_" + fEventData->inputFileSuffix;
+        const std::string path = fConfig->outputDir + "/moshits_" + fEventData->inputFileSuffix;
+        fEventData->moshits.rdbuf()->pubsetbuf(fEventData->iobuf, sizeof(fEventData->iobuf));
         fEventData->moshits.open(path, std::ios::out);
         if (fEventData->moshits.is_open()) {
             fEventData->moshits << fEventData->headerLine << '\n';
@@ -42,28 +39,27 @@ void EventAction::EndOfEventAction(const G4Event* event) {
         fEventData->moshits.close();
     }
 
-    G4cout << "Event " << event->GetEventID()
-           << " [" << fEventData->inputFileSuffix << "]:"
-           << " TotPhot=" << fEventData->TotPhot
-           << " NEntry=" << fEventData->NEntry;
+    // Single consolidated log line (one G4endl flush reduces MT mutex contention)
+    char logbuf[512];
     if (fEventData->NEntry > 0) {
-        G4cout << " tmin=" << fEventData->tmin / ns << "ns"
-               << " tmax=" << fEventData->tmax / ns << "ns";
+        std::snprintf(logbuf, sizeof(logbuf),
+            "Event %d [%s]: TotPhot=%d NEntry=%d tmin=%.4gns tmax=%.4gns"
+            " | Killed: Mir=%d Mos=%d Base=%d Lens=%d PMT=%d Hood=%d World=%d Other=%d Left=%d",
+            event->GetEventID(), fEventData->inputFileSuffix.c_str(),
+            fEventData->TotPhot, fEventData->NEntry,
+            fEventData->tmin / ns, fEventData->tmax / ns,
+            fEventData->diag_nKilledMirror, fEventData->diag_nKilledMosaic,
+            fEventData->diag_nKilledBase, fEventData->diag_nKilledLens,
+            fEventData->diag_nKilledPMT, fEventData->diag_nKilledHood,
+            fEventData->diag_nKilledWorld, fEventData->diag_nKilledOther,
+            fEventData->diag_nLeftWorld);
+    } else {
+        std::snprintf(logbuf, sizeof(logbuf),
+            "Event %d [%s]: TotPhot=%d NEntry=0",
+            event->GetEventID(), fEventData->inputFileSuffix.c_str(),
+            fEventData->TotPhot);
     }
-    G4cout << G4endl;
-
-    // Diagnostic: photon fate breakdown
-    G4cout << "  [DIAG] Killed in:"
-           << " Mirror=" << fEventData->diag_nKilledMirror
-           << " Mosaic=" << fEventData->diag_nKilledMosaic
-           << " Base=" << fEventData->diag_nKilledBase
-           << " Lens=" << fEventData->diag_nKilledLens
-           << " PMT=" << fEventData->diag_nKilledPMT
-           << " Hood=" << fEventData->diag_nKilledHood
-           << " World=" << fEventData->diag_nKilledWorld
-           << " Other=" << fEventData->diag_nKilledOther
-           << " LeftWorld=" << fEventData->diag_nLeftWorld
-           << G4endl;
+    G4cout << logbuf << G4endl;
 
     // Accumulate into G4Accumulable (will be merged in EndOfRunAction)
     auto* accMgr = G4AccumulableManager::Instance();

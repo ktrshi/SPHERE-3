@@ -1,5 +1,7 @@
 #include "G4RunManagerFactory.hh"
 #include "G4UImanager.hh"
+#include "G4UIExecutive.hh"
+#include "G4VisExecutive.hh"
 #include "G4SystemOfUnits.hh"
 #include "sphmirrPhysicsList.hh"
 #include "sphmirrDetectorConstruction.hh"
@@ -15,16 +17,28 @@
 // Set once in main() before DetectorConstruction is created; never modified after.
 G4String AbsolutePath;
 
-int main(const int argc, char** argv) {
+int main(int argc, char** argv) {
+    // Check for --vis flag (interactive visualization mode)
+    bool visMode = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--vis") {
+            visMode = true;
+        }
+    }
+
     // Seed the random number generator
     constexpr G4long myseed = 3453544;
     CLHEP::HepRandom::setTheSeed(myseed);
 
-    // Determine working directory
+    // Determine working directory (first non-flag argument, or exe directory)
     std::string currentPath;
-    if (argc > 1) {
-        currentPath = argv[1];
-    } else {
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) != "--vis") {
+            currentPath = argv[i];
+            break;
+        }
+    }
+    if (currentPath.empty()) {
         currentPath = std::filesystem::path(argv[0]).parent_path().string();
     }
     AbsolutePath = currentPath;
@@ -39,6 +53,9 @@ int main(const int argc, char** argv) {
         G4cout << "WARNING: Height not found in input.ini, using default 500" << G4endl;
     }
 
+    // Read optional thread count from ini (0 or absent = Geant4 default)
+    const std::string threadsStr = ini.get("DEFAULT").get("Threads");
+
     // Build SimConfig (read-only after this point)
     auto* config = new SimConfig();
     config->phi = 0.0 * deg;
@@ -48,18 +65,30 @@ int main(const int argc, char** argv) {
     config->phelsDir = currentPath + "/phels";
     config->outputDir = currentPath + "/moshits";
 
-    // Build FileQueue from phels directory
+    // Build FileQueue from phels directory (skip in vis mode if dir missing)
     auto* fileQueue = new FileQueue();
-    for (const auto& entry : std::filesystem::directory_iterator(config->phelsDir)) {
-        if (entry.is_regular_file()) {
-            fileQueue->Push(entry.path().filename().string());
+    G4int nEvents = 0;
+    if (!visMode || std::filesystem::exists(config->phelsDir)) {
+        for (const auto& entry : std::filesystem::directory_iterator(config->phelsDir)) {
+            if (entry.is_regular_file()) {
+                fileQueue->Push(entry.path().filename().string());
+            }
         }
+        nEvents = static_cast<G4int>(fileQueue->Size());
+        G4cout << "Found " << nEvents << " input files in " << config->phelsDir << G4endl;
+    } else {
+        G4cout << "Visualization mode: skipping phels directory" << G4endl;
     }
-    const auto nEvents = static_cast<G4int>(fileQueue->Size());
-    G4cout << "Found " << nEvents << " input files in " << config->phelsDir << G4endl;
 
     // Create run manager (auto-selects MT if Geant4 built with MT support)
     auto* runManager = G4RunManagerFactory::CreateRunManager();
+    if (!threadsStr.empty()) {
+        const G4int nThreads = std::stoi(threadsStr);
+        if (nThreads > 0) {
+            runManager->SetNumberOfThreads(nThreads);
+            G4cout << "Using " << nThreads << " worker threads" << G4endl;
+        }
+    }
 
     // Detector construction (reads pixel data and STL, sets zstart)
     auto* detector = new sphmirrDetectorConstruction();
@@ -73,10 +102,23 @@ int main(const int argc, char** argv) {
     // Initialize geometry + physics
     runManager->Initialize();
 
-    // Run simulation: one event per input file
-    if (nEvents > 0) {
+    if (visMode) {
+        // Interactive visualization mode
+        auto* visManager = new G4VisExecutive();
+        visManager->Initialize();
+
+        auto* ui = new G4UIExecutive(argc, argv);
         G4UImanager* UImanager = G4UImanager::GetUIpointer();
-        UImanager->ApplyCommand("/run/beamOn " + std::to_string(nEvents));
+        UImanager->ApplyCommand("/control/execute init_vis.mac");
+        ui->SessionStart();
+        delete ui;
+        delete visManager;
+    } else {
+        // Batch simulation mode
+        if (nEvents > 0) {
+            G4UImanager* UImanager = G4UImanager::GetUIpointer();
+            UImanager->ApplyCommand("/run/beamOn " + std::to_string(nEvents));
+        }
     }
 
     delete runManager;

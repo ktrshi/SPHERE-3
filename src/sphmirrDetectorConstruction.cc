@@ -5,7 +5,6 @@
 #include "G4Material.hh"
 #include "G4Element.hh"
 #include "G4LogicalSkinSurface.hh"
-#include "G4LogicalBorderSurface.hh"
 #include "G4OpticalSurface.hh"
 #include "G4Tubs.hh"
 #include "G4ExtrudedSolid.hh"
@@ -62,7 +61,7 @@ sphmirrDetectorConstruction::sphmirrDetectorConstruction() {
     expHall_r = 2.0 * m;
     sphmirr_z = 1751.41 * mm;
     sphmos_r = 83.25 * cm;
-    sphmos_R = 85.83 * cm;
+    sphmos_R = 86.10 * cm;
     sphmos_z = 971.41 * mm;
     hood_r = 850 * mm;
     hood_R = 900 * mm;
@@ -88,13 +87,13 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto mesh = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/mirror_test.stl");
     auto SphMirr = mesh->GetSolid();
     sphmirr_log = new G4LogicalVolume(SphMirr, Al, "Mirror");
-    sphmirr_log->SetVisAttributes(visAttr);
+    // sphmirr_log->SetVisAttributes(visAttr);
     sphmirr_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, sphmirr_z),
                                      sphmirr_log, "Mirror", expHall_log, false, 0);
 // The Mosaic
     [[maybe_unused]] G4bool checkOverlaps = true;
     auto *SphMos = new G4Sphere("Mosaic", sphmos_r, sphmos_R, 0.0 * degree, 360.0 * degree,
-                                0.0 * degree, 21.0 * degree);
+                                0.0 * degree, 23.0 * degree);
     auto extent = SphMos->GetExtent();
     sphmos_log = new G4LogicalVolume(SphMos, Al, "Mosaic");
     constexpr G4double pixel_sphere_R = 86.25 * cm;  // radius of best-fit sphere through pixel positions
@@ -164,30 +163,34 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto visAttrpmm = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
     visAttr->SetVisibility(false);
     auto collector_log = new G4LogicalVolume(collector_solid, Acrylyl, "Collector");
-    collector_log->SetVisAttributes(visAttrpmt);
+    // collector_log->SetVisAttributes(visAttrpmt);
 
 // PMT
     auto sphpmt_solid = new G4Box("PMT", 3 * mm, 3 * mm, pmt_half_z);
     sphpmt_log = new G4LogicalVolume(sphpmt_solid, C, "PMT");
-    sphpmt_log->SetVisAttributes(visAttrpmm);
+    // sphpmt_log->SetVisAttributes(visAttrpmm);
 
 // hood
     auto *cam_hood = new G4Tubs("Hood", hood_r, hood_R, hood_hz,
                                 0.0, 6.283185307179586 * rad);
     hood_log = new G4LogicalVolume(cam_hood, Al, "Hood");
-    auto cam_hood_n = new G4Cons("hood_n", hood_R-0.01*mm, hood_R, sphmos_R-0.01*mm, sphmos_R, (1354.0 / 2)*mm, 0.0, 6.283185307179586 * rad);
+    constexpr G4double mirror_edge_R = 1106.0 * mm;   // from STL bounding box
+    constexpr G4double mirror_rim_z = 1353.4 * mm;    // reflecting surface z at rim (from STL)
+    G4double hood_n_hz = mirror_rim_z / 2.0;
+    auto cam_hood_n = new G4Cons("hood_n",
+        hood_R - 0.01*mm, hood_R,
+        mirror_edge_R - 0.01*mm, mirror_edge_R,
+        hood_n_hz, 0.0, 2 * M_PI * rad);
     auto hood_n_log = new G4LogicalVolume(cam_hood_n, Al, "Hood_n");
-    auto rotm_h = new G4RotationMatrix();
-    rotm_h->rotateZ(180*degree);
-    [[maybe_unused]] auto hood_n_phys = new G4PVPlacement(rotm_h, G4ThreeVector(0.0, 0.0, (1354.0 / 2)*mm), hood_n_log, "Hood_n", expHall_log, false, 0);
+    [[maybe_unused]] auto hood_n_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, hood_n_hz), hood_n_log, "Hood_n", expHall_log, false, 0);
 // Corrector
     visAttr = new G4VisAttributes(G4Colour(0.5, 0.5, 0.9));
     auto mesh_ = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/corrector_A-.stl");
     auto corout = mesh_->GetSolid();
     cor_log = new G4LogicalVolume(corout, Acrylyl, "Corrector");
-    cor_log->SetVisAttributes(visAttr);
-    // cor_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, 0),
-    //                              cor_log, "Corrector", expHall_log, false, 0);
+    // cor_log->SetVisAttributes(visAttr);
+    cor_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, 0),
+                                 cor_log, "Corrector", expHall_log, false, 0);
     auto pos1 = G4ThreeVector(0.0 * cm, 0.0 * cm, 0);
     hood_phys = new G4PVPlacement(nullptr, pos1,
                                   hood_log, "Hood", expHall_log, false, 0);
@@ -250,9 +253,10 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto *OpsphcorSurface = new G4OpticalSurface("sphcorSurfac", unified, polished, dielectric_dielectric);
     OpsphcorSurface->SetMaterialPropertiesTable(mpt);
     [[maybe_unused]] auto *sphcorSkinSurface = new G4LogicalSkinSurface("sphcorSkin", cor_log, OpsphcorSurface);
-//OpticalCollectorSurface (transparent — Fresnel refraction at Air/Acrylyl boundary)
-    [[maybe_unused]] auto *collectorSkinSurface =
-        new G4LogicalSkinSurface("CollectorSkin", collector_log, OpsphcorSurface);
+// NOTE: No SkinSurface on collector_log.  PMT SkinSurface (dielectric_metal)
+// is picked up as PostStep skin when photon enters PMT from Collector.
+// Air↔Collector boundaries use Fresnel from material RINDEX (identical
+// to the former polished dielectric_dielectric skin).
 //OpticalsphPMTSurface
     G4double Reflp[num] = {0.0, 0.0};
     G4double Effip[num] = {1.0, 1.0};
@@ -327,9 +331,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
             rotm_ptr, pos_collector, collector_log, "Collector",
             expHall_log, false, i, true);
 
-        // Detecting border surface: Collector → PMT (overrides transparent skin)
-        new G4LogicalBorderSurface("Collector2PMT_" + std::to_string(i),
-            collector_phys, pmt_phys, OpsphPMTSurface);
+        // PMT detection handled by SkinSurface on sphpmt_log (PostStep priority)
     }
 
     [[maybe_unused]] G4SDManager *SDman = G4SDManager::GetSDMpointer();

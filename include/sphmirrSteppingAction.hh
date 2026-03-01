@@ -6,6 +6,8 @@
 #include "G4ThreeVector.hh"
 #include <vector>
 
+class G4ParticleDefinition;
+class G4LogicalVolume;
 class sphmirrDetectorConstruction;
 struct WorkerEventData;
 struct SimConfig;
@@ -30,6 +32,17 @@ private:
 
     std::vector<PixelNormalCache> pixelCache;
     void InitializePixelCache();
+
+    // Cached pointers for O(1) comparisons (set once per worker)
+    G4ParticleDefinition* fOpticalPhoton{nullptr};
+    const G4LogicalVolume* fPmtLog{nullptr};
+    const G4LogicalVolume* fMirrorLog{nullptr};
+    const G4LogicalVolume* fMosaicLog{nullptr};
+    const G4LogicalVolume* fCollectorLog{nullptr};
+    const G4LogicalVolume* fHoodLog{nullptr};
+    const G4LogicalVolume* fHoodNLog{nullptr};
+    const G4LogicalVolume* fWorldLog{nullptr};
+    void InitializeVolumeCache();
 };
 
 #endif

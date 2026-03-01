@@ -20,12 +20,12 @@ void sphmirrActionInitialization::Build() const {
     auto* eventData = new WorkerEventData();
 
     SetUserAction(new sphmirrPrimaryGeneratorAction(fFileQueue, eventData, fConfig, fDetector));
-    SetUserAction(new RunAction());
+    SetUserAction(new RunAction(fConfig));
     SetUserAction(new EventAction(eventData, fConfig));
     SetUserAction(new sphmirrSteppingAction(eventData, fConfig, fDetector));
     SetUserAction(new sphmirrStackingAction());
 }
 
 void sphmirrActionInitialization::BuildForMaster() const {
-    SetUserAction(new RunAction());
+    SetUserAction(new RunAction(fConfig));
 }

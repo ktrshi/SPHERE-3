@@ -14,7 +14,8 @@
 #include <cmath>
 #include <optional>
 #include <cstdlib>
-#include <regex>
+#include <cstdio>
+#include <cctype>
 
 sphmirrPrimaryGeneratorAction::sphmirrPrimaryGeneratorAction(
         FileQueue* fileQueue,
@@ -75,9 +76,18 @@ std::string sphmirrPrimaryGeneratorAction::BuildSuffix(const std::string& inputF
     if (pos == std::string::npos) return {};
     std::string params = inputFilename.substr(pos);
     std::erase(params, ' ');
-    std::regex pattern(R"((_c\d{3})$)");
-    std::string insert = "_" + fEventData->height + "m$1";
-    return std::regex_replace(params, pattern, insert);
+
+    // Match "_cNNN" (exactly 3 digits) at end of string — replaces std::regex
+    if (params.size() >= 5) {
+        const size_t cpos = params.size() - 5;
+        if (params[cpos] == '_' && params[cpos + 1] == 'c' &&
+            std::isdigit(static_cast<unsigned char>(params[cpos + 2])) &&
+            std::isdigit(static_cast<unsigned char>(params[cpos + 3])) &&
+            std::isdigit(static_cast<unsigned char>(params[cpos + 4]))) {
+            return params.substr(0, cpos) + "_" + fEventData->height + "m" + params.substr(cpos);
+        }
+    }
+    return params;
 }
 
 void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
@@ -132,16 +142,18 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
 
     // Read all photon lines and create primary vertices
     fEventData->photonMeta.clear();
+    fEventData->photonMeta.reserve(100000);
     const G4double zstart = fDetector->GetZstart();
     const G4double zz = fEventData->zz;
 
     std::string line;
+    line.reserve(128);
     int lineCount = 0;
     while (std::getline(inpho, line)) {
         int ii, jj, kk, mmm;
         double xx, yy, t0;
-        std::istringstream iss(line);
-        if (!(iss >> ii >> jj >> kk >> mmm >> xx >> yy >> t0)) {
+        if (std::sscanf(line.c_str(), "%d %d %d %d %lf %lf %lf",
+                         &ii, &jj, &kk, &mmm, &xx, &yy, &t0) != 7) {
             G4cout << "WARNING: Skipping malformed line: " << line << G4endl;
             continue;
         }

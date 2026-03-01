@@ -1,10 +1,14 @@
 #include "sphmirrRunAction.hh"
+#include "SimConfig.hh"
 #include "G4Run.hh"
 #include "G4Timer.hh"
 #include "G4AccumulableManager.hh"
 #include "G4SystemOfUnits.hh"
+#include "G4Threading.hh"
+#include <filesystem>
 
-RunAction::RunAction() : fTimer(new G4Timer) {
+RunAction::RunAction(const SimConfig* config)
+    : fTimer(new G4Timer), fConfig(config) {
     auto* accMgr = G4AccumulableManager::Instance();
     accMgr->Register(fTotPhotTotal);
     accMgr->Register(fNEntryTotal);
@@ -17,6 +21,13 @@ RunAction::~RunAction() { delete fTimer; }
 void RunAction::BeginOfRunAction(const G4Run* aRun) {
     G4cout << "### Run " << aRun->GetRunID() << " start." << G4endl;
     G4AccumulableManager::Instance()->Reset();
+
+    // Create output directory on master thread before workers start
+    if (G4Threading::IsMasterThread() && fConfig &&
+        !fConfig->outputDir.empty()) {
+        std::filesystem::create_directories(fConfig->outputDir);
+    }
+
     fTimer->Start();
 }
 

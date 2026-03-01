@@ -9,16 +9,18 @@
 
 class G4Timer;
 class G4Run;
+struct SimConfig;
 
 class RunAction final : public G4UserRunAction {
 public:
-    RunAction();
+    explicit RunAction(const SimConfig* config = nullptr);
     ~RunAction() override;
     void BeginOfRunAction(const G4Run* aRun) override;
     void EndOfRunAction(const G4Run* aRun) override;
 
 private:
     G4Timer* fTimer;
+    const SimConfig* fConfig;
     G4Accumulable<G4int> fTotPhotTotal{"TotPhotTotal", 0};
     G4Accumulable<G4int> fNEntryTotal{"NEntryTotal", 0};
     G4Accumulable<G4double> fTminAll{"TminAll", std::numeric_limits<G4double>::max(), G4MergeMode::kMinimum};
