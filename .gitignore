@@ -1,0 +1,19 @@
+/.cache/
+/.venv/
+/.vscode/
+/.zed/
+/.idea/
+.DS_Store
+/build/
+/phels/
+/phels_check/
+/phels_test/
+/temp/
+/moshits/
+*.zip
+/Names
+/sphall
+/sphall_g4_sh_wbg.in
+/sphall_g4_sh_wbg_S3corr.f
+/vis copy.mac
+/generation.py
