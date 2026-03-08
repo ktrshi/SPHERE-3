@@ -18,11 +18,24 @@
 G4String AbsolutePath;
 
 int main(int argc, char** argv) {
-    // Check for --vis flag (interactive visualization mode)
+    // Parse command-line arguments in a single pass
     bool visMode = false;
+    std::string currentPath;
+    std::string cliPhelsDir;
+    std::string cliMoshitsDir;
+    std::string cliThreads;
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--vis") {
+        std::string arg = argv[i];
+        if (arg == "--vis") {
             visMode = true;
+        } else if (arg == "--phels" && i + 1 < argc) {
+            cliPhelsDir = argv[++i];
+        } else if (arg == "--moshits" && i + 1 < argc) {
+            cliMoshitsDir = argv[++i];
+        } else if (arg == "--threads" && i + 1 < argc) {
+            cliThreads = argv[++i];
+        } else if (currentPath.empty()) {
+            currentPath = argv[i];
         }
     }
 
@@ -30,14 +43,6 @@ int main(int argc, char** argv) {
     constexpr G4long myseed = 3453544;
     CLHEP::HepRandom::setTheSeed(myseed);
 
-    // Determine working directory (first non-flag argument, or exe directory)
-    std::string currentPath;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) != "--vis") {
-            currentPath = argv[i];
-            break;
-        }
-    }
     if (currentPath.empty()) {
         currentPath = std::filesystem::path(argv[0]).parent_path().string();
     }
@@ -47,11 +52,6 @@ int main(int argc, char** argv) {
     const mINI::INIFile iniFile("input.ini");
     mINI::INIStructure ini;
     iniFile.read(ini);
-    std::string height = ini.get("DEFAULT").get("Height");
-    if (height.empty()) {
-        height = "500";
-        G4cout << "WARNING: Height not found in input.ini, using default 500" << G4endl;
-    }
 
     // Read optional thread count from ini (0 or absent = Geant4 default)
     const std::string threadsStr = ini.get("DEFAULT").get("Threads");
@@ -62,8 +62,8 @@ int main(int argc, char** argv) {
     config->the = 0.0 * deg;
     config->p1 = 1.093;
     config->currentPath = currentPath;
-    config->phelsDir = currentPath + "/phels";
-    config->outputDir = currentPath + "/moshits";
+    config->phelsDir = cliPhelsDir.empty() ? currentPath + "/phels" : cliPhelsDir;
+    config->outputDir = cliMoshitsDir.empty() ? currentPath + "/moshits" : cliMoshitsDir;
 
     // Build FileQueue from phels directory (skip in vis mode if dir missing)
     auto* fileQueue = new FileQueue();
@@ -82,8 +82,9 @@ int main(int argc, char** argv) {
 
     // Create run manager (auto-selects MT if Geant4 built with MT support)
     auto* runManager = G4RunManagerFactory::CreateRunManager();
-    if (!threadsStr.empty()) {
-        const G4int nThreads = std::stoi(threadsStr);
+    const std::string finalThreads = cliThreads.empty() ? threadsStr : cliThreads;
+    if (!finalThreads.empty()) {
+        const G4int nThreads = std::stoi(finalThreads);
         if (nThreads > 0) {
             runManager->SetNumberOfThreads(nThreads);
             G4cout << "Using " << nThreads << " worker threads" << G4endl;
