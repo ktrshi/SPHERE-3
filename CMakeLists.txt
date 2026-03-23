@@ -34,6 +34,12 @@ endif ()
 include(${Geant4_USE_FILE})
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
+# --- zstd ---
+find_library(ZSTD_LIB zstd REQUIRED)
+find_path(ZSTD_INCLUDE zstd.h REQUIRED)
+message(STATUS "zstd library: ${ZSTD_LIB}")
+message(STATUS "zstd include: ${ZSTD_INCLUDE}")
+
 #----------------------------------------------------------------------------
 # Locate sources and headers for this project
 # NB: headers are included so they will show up in IDEs
@@ -48,7 +54,8 @@ add_executable(SPHERE-3 SPHERE-3.cpp ${sources} ${headers})
 set_property(TARGET SPHERE-3 PROPERTY CXX_STANDARD 20)
 set_property(TARGET SPHERE-3 PROPERTY CXX_STANDARD_REQUIRED ON)
 set_property(TARGET SPHERE-3 PROPERTY CXX_EXTENSIONS OFF)
-target_link_libraries(SPHERE-3 ${Geant4_LIBRARIES})
+target_include_directories(SPHERE-3 PRIVATE ${ZSTD_INCLUDE})
+target_link_libraries(SPHERE-3 ${Geant4_LIBRARIES} ${ZSTD_LIB})
 
 set(SPHERE-3_SCRIPTS
         init_vis.mac
