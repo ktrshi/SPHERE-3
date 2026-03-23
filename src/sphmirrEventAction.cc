@@ -55,10 +55,10 @@ void EventAction::EndOfEventAction(const G4Event* event) {
 
     // Accumulate into G4Accumulable (will be merged in EndOfRunAction)
     auto* accMgr = G4AccumulableManager::Instance();
-    auto* accTotPhot = accMgr->GetAccValue<G4int>("TotPhotTotal");
-    auto* accNEntry  = accMgr->GetAccValue<G4int>("NEntryTotal");
-    auto* accTmin    = accMgr->GetAccValue<G4double>("TminAll");
-    auto* accTmax    = accMgr->GetAccValue<G4double>("TmaxAll");
+    auto* accTotPhot = accMgr->GetAccumulable<G4int>("TotPhotTotal");
+    auto* accNEntry  = accMgr->GetAccumulable<G4int>("NEntryTotal");
+    auto* accTmin    = accMgr->GetAccumulable<G4double>("TminAll");
+    auto* accTmax    = accMgr->GetAccumulable<G4double>("TmaxAll");
     if (accTotPhot) *accTotPhot += fEventData->TotPhot;
     if (accNEntry)  *accNEntry  += fEventData->NEntry;
     if (accTmin && fEventData->NEntry > 0) {

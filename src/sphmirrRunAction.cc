@@ -10,10 +10,10 @@
 RunAction::RunAction(const SimConfig* config)
     : fTimer(new G4Timer), fConfig(config) {
     auto* accMgr = G4AccumulableManager::Instance();
-    accMgr->Register(fTotPhotTotal);
-    accMgr->Register(fNEntryTotal);
-    accMgr->Register(fTminAll);
-    accMgr->Register(fTmaxAll);
+    accMgr->RegisterAccumulable(fTotPhotTotal);
+    accMgr->RegisterAccumulable(fNEntryTotal);
+    accMgr->RegisterAccumulable(fTminAll);
+    accMgr->RegisterAccumulable(fTmaxAll);
 }
 
 RunAction::~RunAction() { delete fTimer; }

@@ -13,6 +13,10 @@ REMOTE_DIR="/home/ivanov/SPHERE-3_G4"
 if [ "$BUILD_ONLY" != "--build-only" ]; then
     echo "==> Syncing code to $SERVER:$REMOTE_DIR ..."
     rsync -avz --exclude build/ --exclude '.git/' --exclude '*.o' \
+        --exclude '.venv/' --exclude '.cache/' --exclude '.idea/' \
+        --exclude '.serena/' --exclude '.vscode/' --exclude '.zed/' \
+        --exclude '.claude/' --exclude 'docs/' --exclude '.DS_Store' \
+        --exclude 'moshits_*.zip' --exclude '__pycache__/' \
         "$(dirname "$0")/../" "$SERVER:$REMOTE_DIR/"
 fi
 
