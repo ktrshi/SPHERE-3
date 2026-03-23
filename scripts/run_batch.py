@@ -96,12 +96,9 @@ def run_one(phels_dir: Path, moshits_root: Path, sphere_bin: Path,
 
     try:
         with open(log_file, "w") as lf:
-            result = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, timeout=7200)
+            result = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT)
         success = result.returncode == 0
         status = "completed" if success else f"failed:{result.returncode}"
-    except subprocess.TimeoutExpired:
-        success = False
-        status = "failed:timeout"
     except Exception as e:
         success = False
         status = f"failed:{e}"
