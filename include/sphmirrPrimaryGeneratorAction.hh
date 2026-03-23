@@ -3,6 +3,7 @@
 
 #include "G4VUserPrimaryGeneratorAction.hh"
 #include "globals.hh"
+#include "PhelReader.hh"
 
 class G4ParticleGun;
 class G4Event;
@@ -33,13 +34,11 @@ private:
     void SetOptPhotonPolar() const;
     void SetOptPhotonPolar(G4double angle) const;
 
-    /// Parse input file header line, fill fEventData fields (zz, xsh, ysh, height).
-    /// Returns false if header is invalid.
-    bool ParseHeader(const std::string& headerLine);
-
     /// Build output file suffix from input filename.
-    /// "phels_to_trace_Q0_atm01_..." -> "Q0_atm01_..."
-    std::string BuildSuffix(const std::string& inputFilename);
+    /// Strips .phel.zst, extracts from Q marker, inserts height.
+    std::string BuildSuffix(const std::string& filename, const std::string& height);
+
+    PhelEvent fCurrentEvent;
 };
 
 #endif /*sphmirrPrimaryGeneratorAction_h*/

@@ -9,13 +9,12 @@
 #include "G4SystemOfUnits.hh"
 #include "G4RunManager.hh"
 #include "Randomize.hh"
-#include <fstream>
-#include <sstream>
 #include <cmath>
-#include <optional>
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <algorithm>
+#include <limits>
 
 sphmirrPrimaryGeneratorAction::sphmirrPrimaryGeneratorAction(
         FileQueue* fileQueue,
@@ -44,50 +43,36 @@ sphmirrPrimaryGeneratorAction::~sphmirrPrimaryGeneratorAction() {
     delete fParticleGun;
 }
 
-bool sphmirrPrimaryGeneratorAction::ParseHeader(const std::string& headerLine) {
-    auto safeParse = [](const std::string& s) -> std::optional<double> {
-        char* end = nullptr;
-        const double v = std::strtod(s.c_str(), &end);
-        if (end == s.c_str() || *end != '\0') return std::nullopt;
-        return v;
-    };
-
-    std::istringstream iss(headerLine);
-    std::vector<std::string> values;
-    std::string value;
-    while (iss >> value) values.push_back(value);
-
-    if (values.size() >= 4) {
-        if (auto vx = safeParse(values[3])) fEventData->xsh = *vx * m;
-        if (auto vy = safeParse(values[2])) fEventData->ysh = *vy * m;
-        if (auto vz = safeParse(values[1])) fEventData->zz = *vz * m;
+std::string sphmirrPrimaryGeneratorAction::BuildSuffix(
+    const std::string& filename, const std::string& height)
+{
+    // Strip .phel.zst extension
+    std::string name = filename;
+    const std::string ext = ".phel.zst";
+    if (name.size() > ext.size() &&
+        name.compare(name.size() - ext.size(), ext.size(), ext) == 0) {
+        name = name.substr(0, name.size() - ext.size());
     }
-    if (values.size() >= 2) {
-        if (auto vh = safeParse(values[1])) {
-            const int h_int = static_cast<int>(std::lround(std::fabs(*vh)));
-            fEventData->height = std::to_string(h_int);
+
+    // Find "Q" marker
+    auto qpos = name.find('Q');
+    if (qpos == std::string::npos) return name;
+    std::string suffix = name.substr(qpos);
+
+    // Remove spaces
+    suffix.erase(std::remove(suffix.begin(), suffix.end(), ' '), suffix.end());
+
+    // Insert _{height}m before _cNNN at end
+    if (suffix.size() >= 5 && suffix[suffix.size()-5] == '_' && suffix[suffix.size()-4] == 'c') {
+        bool allDigits = true;
+        for (int i = 3; i >= 1; --i) {
+            if (!std::isdigit(suffix[suffix.size()-i])) allDigits = false;
+        }
+        if (allDigits) {
+            suffix.insert(suffix.size()-5, "_" + height + "m");
         }
     }
-    return true;
-}
-
-std::string sphmirrPrimaryGeneratorAction::BuildSuffix(const std::string& inputFilename) {
-    size_t pos = inputFilename.find("Q");
-    if (pos == std::string::npos) return {};
-    std::string params = inputFilename.substr(pos);
-    std::erase(params, ' ');
-
-    // Match "_cNNN" (exactly 3 digits) at end of string — replaces std::regex
-    if (params.size() >= 5) {
-        const size_t cpos = params.size() - 5;
-        if (params[cpos] == '_' && params[cpos + 1] == 'c' &&
-            std::isdigit(static_cast<unsigned char>(params[cpos + 2])) &&
-            std::isdigit(static_cast<unsigned char>(params[cpos + 3])) &&
-            std::isdigit(static_cast<unsigned char>(params[cpos + 4]))) {
-            return params.substr(0, cpos) + "_" + fEventData->height + "m" + params.substr(cpos);
-        }
-    }
-    return params;
+    return suffix;
 }
 
 void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
@@ -95,15 +80,14 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
     // Geant4 calls GeneratePrimaries BEFORE BeginOfEventAction.
     fEventData->TotPhot = 0;
     fEventData->NEntry = 0;
-    fEventData->tmin = std::numeric_limits<G4double>::max();
-    fEventData->tmax = 0.0;
+    fEventData->tmin = std::numeric_limits<double>::max();
+    fEventData->tmax = -std::numeric_limits<double>::max();
     fEventData->inputFileSuffix.clear();
-    fEventData->photonMeta.clear();
+    fEventData->photonData = nullptr;
     // Reset diagnostics
     fEventData->diag_nKilledMirror = 0;
     fEventData->diag_nKilledMosaic = 0;
     fEventData->diag_nKilledBase = 0;
-    fEventData->diag_nKilledLens = 0;
     fEventData->diag_nKilledHood = 0;
     fEventData->diag_nKilledPMT = 0;
     fEventData->diag_nKilledWorld = 0;
@@ -117,54 +101,37 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
         return;
     }
 
-    // Open input file (local variable -- no shared state)
-    std::ifstream inpho(fConfig->phelsDir + "/" + filename);
-    if (!inpho.is_open()) {
-        G4cout << "WARNING: Cannot open " << filename << ", skipping." << G4endl;
+    // Read binary .phel.zst file
+    std::string filepath = fConfig->phelsDir + "/" + filename;
+    try {
+        fCurrentEvent = PhelReader::Read(filepath);
+    } catch (const std::runtime_error& e) {
+        G4cerr << "PhelReader error: " << e.what() << G4endl;
         return;
     }
 
-    // Read and parse header line
-    std::string headerLine;
-    if (!std::getline(inpho, headerLine)) {
-        G4cout << "WARNING: Empty file " << filename << ", skipping." << G4endl;
-        return;
-    }
-    fEventData->headerLine = headerLine;
-    ParseHeader(headerLine);
+    // Extract header data
+    fEventData->zz  = fCurrentEvent.zz;
+    fEventData->xsh = fCurrentEvent.xsh;
+    fEventData->ysh = fCurrentEvent.ysh;
+    int heightVal = static_cast<int>(std::abs(fCurrentEvent.zz));
+    fEventData->height = std::to_string(heightVal);
+    fEventData->inputFileSuffix = BuildSuffix(filename, fEventData->height);
+    fEventData->photonData = &fCurrentEvent.photons;
+    fEventData->moshitWriter.Begin(fCurrentEvent.zz, fCurrentEvent.xsh, fCurrentEvent.ysh);
 
-    // Build output suffix
-    fEventData->inputFileSuffix = BuildSuffix(filename);
     if (fEventData->inputFileSuffix.empty()) {
         G4cout << "WARNING: Invalid filename format: " << filename << G4endl;
         return;
     }
 
-    // Read all photon lines and create primary vertices
-    fEventData->photonMeta.clear();
-    fEventData->photonMeta.reserve(100000);
+    // Generate primary vertices from photon data
     const G4double zstart = fDetector->GetZstart();
-    const G4double zz = fEventData->zz;
+    // Convert zz from meters (raw header) to Geant4 internal units (mm)
+    const G4double zz = fCurrentEvent.zz * m;
 
-    std::string line;
-    line.reserve(128);
     int lineCount = 0;
-    while (std::getline(inpho, line)) {
-        int ii, jj, kk, mmm;
-        double xx, yy, t0;
-        if (std::sscanf(line.c_str(), "%d %d %d %d %lf %lf %lf",
-                         &ii, &jj, &kk, &mmm, &xx, &yy, &t0) != 7) {
-            G4cout << "WARNING: Skipping malformed line: " << line << G4endl;
-            continue;
-        }
-
-        // Store per-photon metadata for SteppingAction lookup
-        PhotonMeta meta;
-        meta.ii = ii; meta.jj = jj; meta.kk = kk; meta.mmm = mmm;
-        meta.xx = xx; meta.yy = yy; meta.t0 = t0;
-        meta.origin = (mmm < 100) ? 1 : 2;
-        fEventData->photonMeta.push_back(meta);
-
+    for (const auto& ph : fCurrentEvent.photons) {
         // Compute entry point in hood opening
         G4double r = 85.0 * cm * std::sqrt(G4UniformRand());
         G4double dzeta = 360.0 * deg * G4UniformRand();
@@ -178,8 +145,8 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
         G4double zi = fSinTheta * xi0 + fCosTheta * zi0 + zstart;
 
         // Direction from snow-level source to entry point
-        G4double xgr = xx * m;
-        G4double ygr = yy * m;
+        G4double xgr = ph.x * m;
+        G4double ygr = ph.y * m;
         G4double diag = std::sqrt((xi - xgr) * (xi - xgr) + (yi - ygr) * (yi - ygr) + (zz - zi) * (zz - zi));
         G4double pxb = (xi - xgr) / diag;
         G4double pyb = (yi - ygr) / diag;
@@ -187,7 +154,7 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
 
         fParticleGun->SetParticlePosition(G4ThreeVector(xi, yi, zi));
         fParticleGun->SetParticleMomentumDirection(G4ThreeVector(pxb, pyb, pzb));
-        fParticleGun->SetParticleTime(t0 * ns);
+        fParticleGun->SetParticleTime(ph.t * ns);
         SetOptPhotonPolar();
         fParticleGun->GeneratePrimaryVertex(anEvent);
 

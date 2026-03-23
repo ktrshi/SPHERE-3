@@ -34,9 +34,8 @@ void sphmirrSteppingAction::InitializePixelCache() {
     const G4double* pz = fDetector->GetPixZ();
     pixelCache.assign(sphmirrDetectorConstruction::kNPixels, {});
     for (G4int i = 0; i < sphmirrDetectorConstruction::kNPixels; i++) {
-        const G4double r = std::sqrt(px[i]*px[i] + py[i]*py[i] + pz[i]*pz[i]);
-        const G4double inv_r = 1.0 / r;
-        pixelCache[i] = {inv_r, px[i]*inv_r, py[i]*inv_r, pz[i]*inv_r};
+        const G4double inv_r = 1.0 / std::sqrt(px[i]*px[i] + py[i]*py[i] + pz[i]*pz[i]);
+        pixelCache[i] = {px[i]*inv_r, py[i]*inv_r, pz[i]*inv_r};
     }
 }
 
@@ -50,19 +49,6 @@ void sphmirrSteppingAction::InitializeVolumeCache() {
     fHoodLog      = store->GetVolume("Hood");
     fHoodNLog     = store->GetVolume("Hood_n");
     fWorldLog     = store->GetVolume("World");
-}
-
-// Format one detection line into buf. Returns number of chars written.
-static int FormatDetectionLine(char* buf, size_t bufsize,
-    int cluster, int pix,
-    double x, double y, double z, double t,
-    double dx, double dy, double dz,
-    int origin, int ii, int jj, int kk,
-    double xx, double yy, double t0)
-{
-    return std::snprintf(buf, bufsize,
-        "%5d%5d%14g%14g%14g%14g%14g%14g%14g%5d%5d%5d%5d%14g%14g%14g\n",
-        cluster, pix, x, y, z, t, dx, dy, dz, origin, ii, jj, kk, xx, yy, t0);
 }
 
 void sphmirrSteppingAction::UserSteppingAction(const G4Step* aStep) {
@@ -91,13 +77,13 @@ void sphmirrSteppingAction::UserSteppingAction(const G4Step* aStep) {
 
     if (postLog != fPmtLog) return;
 
-    const G4TouchableHandle theTouchable = thePostPoint->GetTouchableHandle();
-    const G4int copyNo = theTouchable->GetCopyNumber(1);
+    const G4int copyNo = thePostPoint->GetTouchableHandle()->GetCopyNumber(1);
     const auto& cache = pixelCache[copyNo];
 
-    const G4double dirx = thePostPoint->GetMomentumDirection().x();
-    const G4double diry = thePostPoint->GetMomentumDirection().y();
-    const G4double dirz = thePostPoint->GetMomentumDirection().z();
+    const auto& dir = thePostPoint->GetMomentumDirection();
+    const G4double dirx = dir.x();
+    const G4double diry = dir.y();
+    const G4double dirz = dir.z();
     const G4double dot = cache.u * dirx + cache.v * diry + cache.w * dirz;
 
     if (dot < 0.0) {
@@ -113,54 +99,40 @@ void sphmirrSteppingAction::UserSteppingAction(const G4Step* aStep) {
         if (pp > 0.0 && G4UniformRand() < std::pow(pp, fConfig->p1)) {
             // Look up per-photon metadata by trackID
             const G4int trackID = fTrack->GetTrackID();
-            const PhotonMeta* meta = nullptr;
-            if (trackID >= 1 && trackID <= static_cast<G4int>(fEventData->photonMeta.size())) {
-                meta = &fEventData->photonMeta[trackID - 1];
+            const PhelPhoton* meta = nullptr;
+            const auto* photonData = fEventData->photonData;
+            if (photonData && trackID >= 1 &&
+                trackID <= static_cast<G4int>(photonData->size())) {
+                meta = &(*photonData)[trackID - 1];
             }
             // Fallback for secondary optical photons: use parent
             if (!meta) {
                 const G4int parentID = fTrack->GetParentID();
-                if (parentID >= 1 && parentID <= static_cast<G4int>(fEventData->photonMeta.size())) {
-                    meta = &fEventData->photonMeta[parentID - 1];
+                if (photonData && parentID >= 1 &&
+                    parentID <= static_cast<G4int>(photonData->size())) {
+                    meta = &(*photonData)[parentID - 1];
                 }
             }
-            if (!meta) return;  // shouldn't happen, but guard
+            if (!meta) return;
 
-            // Lazy file opening: open moshits on first detection
-            if (!fEventData->moshits.is_open() && !fEventData->inputFileSuffix.empty()) {
-                fEventData->moshits.rdbuf()->pubsetbuf(fEventData->iobuf, sizeof(fEventData->iobuf));
-                fEventData->moshits.open(fConfig->outputDir + "/moshits_" + fEventData->inputFileSuffix, std::ios::out);
-                fEventData->moshits << fEventData->headerLine << '\n';
-            }
+            uint8_t origin = meta->is_background ? 2 : 1;
+            uint16_t pixel = static_cast<uint16_t>(cluster_num * 7 + pix_num);
+            float det_t = static_cast<float>(glt / ns);
+            float det_t0 = meta->t;
 
-            const G4double x_m = thePostPoint->GetPosition().x() / m;
-            const G4double y_m = thePostPoint->GetPosition().y() / m;
-            const G4double z_m = thePostPoint->GetPosition().z() / m;
-            const G4double glt_ns = glt / ns;
-
-            char line[256];
             fEventData->NEntry++;
-            int n = FormatDetectionLine(line, sizeof(line),
-                cluster_num, pix_num,
-                x_m, y_m, z_m, glt_ns,
-                dirx, diry, dirz,
-                meta->origin, meta->ii, meta->jj, meta->kk,
-                meta->xx, meta->yy, meta->t0);
-            fEventData->moshits.write(line, n);
+            fEventData->moshitWriter.AddHit(pixel, det_t, origin,
+                                             meta->i, meta->j, meta->time_bin, det_t0);
 
             // Crosstalk simulation: each of 6 neighbors fires independently with 7% probability
             constexpr G4double crosstalk_prob = 0.07;
             for (int nb = 1; nb <= 6; nb++) {
                 if (G4UniformRand() < crosstalk_prob) {
                     const G4int neighbor_pix = (pix_num + nb) % 7;
+                    uint16_t neighbor_pixel = static_cast<uint16_t>(cluster_num * 7 + neighbor_pix);
                     fEventData->NEntry++;
-                    n = FormatDetectionLine(line, sizeof(line),
-                        cluster_num, neighbor_pix,
-                        x_m, y_m, z_m, glt_ns,
-                        dirx, diry, dirz,
-                        meta->origin, meta->ii, meta->jj, meta->kk,
-                        meta->xx, meta->yy, meta->t0);
-                    fEventData->moshits.write(line, n);
+                    fEventData->moshitWriter.AddHit(neighbor_pixel, det_t, origin,
+                                                     meta->i, meta->j, meta->time_bin, det_t0);
                 }
             }
         }

@@ -20,36 +20,28 @@ void EventAction::BeginOfEventAction(const G4Event*) {
 }
 
 void EventAction::EndOfEventAction(const G4Event* event) {
-    // Skip empty events (no file was assigned)
     if (fEventData->inputFileSuffix.empty()) return;
 
-    // Open output file if not already open (e.g. zero detections — still write header)
-    // Output directory is created by RunAction::BeginOfRunAction on master thread
-    if (!fEventData->moshits.is_open()) {
-        const std::string path = fConfig->outputDir + "/moshits_" + fEventData->inputFileSuffix;
-        fEventData->moshits.rdbuf()->pubsetbuf(fEventData->iobuf, sizeof(fEventData->iobuf));
-        fEventData->moshits.open(path, std::ios::out);
-        if (fEventData->moshits.is_open()) {
-            fEventData->moshits << fEventData->headerLine << '\n';
-        }
+    // Flush compressed binary output
+    std::string outFile = fConfig->outputDir + "/moshits_" +
+                          fEventData->inputFileSuffix + ".moshit.zst";
+    try {
+        fEventData->moshitWriter.Flush(outFile);
+    } catch (const std::runtime_error& e) {
+        G4cerr << "MoshitWriter error: " << e.what() << G4endl;
     }
 
-    // Close the output file
-    if (fEventData->moshits.is_open()) {
-        fEventData->moshits.close();
-    }
-
-    // Single consolidated log line (one G4endl flush reduces MT mutex contention)
+    // Log summary (same format as before)
     char logbuf[512];
     if (fEventData->NEntry > 0) {
         std::snprintf(logbuf, sizeof(logbuf),
             "Event %d [%s]: TotPhot=%d NEntry=%d tmin=%.4gns tmax=%.4gns"
-            " | Killed: Mir=%d Mos=%d Base=%d Lens=%d PMT=%d Hood=%d World=%d Other=%d Left=%d",
+            " | Killed: Mir=%d Mos=%d Base=%d PMT=%d Hood=%d World=%d Other=%d Left=%d",
             event->GetEventID(), fEventData->inputFileSuffix.c_str(),
             fEventData->TotPhot, fEventData->NEntry,
             fEventData->tmin / ns, fEventData->tmax / ns,
             fEventData->diag_nKilledMirror, fEventData->diag_nKilledMosaic,
-            fEventData->diag_nKilledBase, fEventData->diag_nKilledLens,
+            fEventData->diag_nKilledBase,
             fEventData->diag_nKilledPMT, fEventData->diag_nKilledHood,
             fEventData->diag_nKilledWorld, fEventData->diag_nKilledOther,
             fEventData->diag_nLeftWorld);
@@ -70,7 +62,6 @@ void EventAction::EndOfEventAction(const G4Event* event) {
     if (accTotPhot) *accTotPhot += fEventData->TotPhot;
     if (accNEntry)  *accNEntry  += fEventData->NEntry;
     if (accTmin && fEventData->NEntry > 0) {
-        // For min: only update if this event's tmin is smaller
         if (fEventData->tmin < accTmin->GetValue())
             *accTmin = fEventData->tmin;
     }
@@ -78,4 +69,6 @@ void EventAction::EndOfEventAction(const G4Event* event) {
         if (fEventData->tmax > accTmax->GetValue())
             *accTmax = fEventData->tmax;
     }
+
+    fEventData->moshitWriter.Reset();
 }
