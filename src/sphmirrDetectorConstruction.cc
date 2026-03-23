@@ -48,8 +48,8 @@ sphmirrDetectorConstruction::sphmirrDetectorConstruction() {
         exit(1);
     }
     G4double x, y, z, phi, theta, tmp;
+    G4int i = 0;
     while (pixel_data >> x >> y >> z >> tmp >> tmp >> tmp >> phi >> theta) {
-        static G4int i = 0;
         fPixX[i] = x * mm;
         fPixY[i] = y * mm;
         fPixZ[i] = z * mm;
@@ -83,11 +83,9 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     expHall_phys
             = new G4PVPlacement(nullptr, G4ThreeVector(), expHall_log, "World", nullptr, false, 0);
 // The Mirror
-    auto *visAttr = new G4VisAttributes(G4Colour(0.5, 0.5, 0.5));
     auto mesh = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/mirror_test.stl");
     auto SphMirr = mesh->GetSolid();
     sphmirr_log = new G4LogicalVolume(SphMirr, Al, "Mirror");
-    // sphmirr_log->SetVisAttributes(visAttr);
     sphmirr_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, sphmirr_z),
                                      sphmirr_log, "Mirror", expHall_log, false, 0);
 // The Mosaic
@@ -159,16 +157,11 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
         G4ThreeVector(0, 0, sphere_center_z_in_base)
     );
 
-    auto visAttrpmt = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
-    auto visAttrpmm = new G4VisAttributes(G4Colour(0.4, 0.4, 0.4));
-    visAttr->SetVisibility(false);
     auto collector_log = new G4LogicalVolume(collector_solid, Acrylyl, "Collector");
-    // collector_log->SetVisAttributes(visAttrpmt);
 
 // PMT
     auto sphpmt_solid = new G4Box("PMT", 3 * mm, 3 * mm, pmt_half_z);
     sphpmt_log = new G4LogicalVolume(sphpmt_solid, C, "PMT");
-    // sphpmt_log->SetVisAttributes(visAttrpmm);
 
 // hood
     auto *cam_hood = new G4Tubs("Hood", hood_r, hood_R, hood_hz,
@@ -184,11 +177,9 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto hood_n_log = new G4LogicalVolume(cam_hood_n, Al, "Hood_n");
     [[maybe_unused]] auto hood_n_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, hood_n_hz), hood_n_log, "Hood_n", expHall_log, false, 0);
 // Corrector
-    visAttr = new G4VisAttributes(G4Colour(0.5, 0.5, 0.9));
     auto mesh_ = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/corrector_A-.stl");
     auto corout = mesh_->GetSolid();
     cor_log = new G4LogicalVolume(corout, Acrylyl, "Corrector");
-    // cor_log->SetVisAttributes(visAttr);
     cor_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, 0),
                                  cor_log, "Corrector", expHall_log, false, 0);
     auto pos1 = G4ThreeVector(0.0 * cm, 0.0 * cm, 0);
@@ -275,7 +266,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto pmt_phys = new G4PVPlacement(
         nullptr,
         G4ThreeVector(0, 0, -collector_base_height / 2.0 + pmt_half_z),
-        sphpmt_log, "PMT", collector_log, false, 0, true);
+        sphpmt_log, "PMT", collector_log, false, 0, false);
 
 // Place Collector for each pixel, with detecting border surface to PMT
     rotationMatrixCache.reserve(2653);
@@ -329,7 +320,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
 
         auto collector_phys = new G4PVPlacement(
             rotm_ptr, pos_collector, collector_log, "Collector",
-            expHall_log, false, i, true);
+            expHall_log, false, i, false);
 
         // PMT detection handled by SkinSurface on sphpmt_log (PostStep priority)
     }
