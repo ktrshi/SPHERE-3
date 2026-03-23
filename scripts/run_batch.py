@@ -8,7 +8,6 @@ runs SPHERE-3 for each, tracks progress in progress.tsv.
 import argparse
 import fcntl
 import logging
-import os
 import subprocess
 import sys
 import time
