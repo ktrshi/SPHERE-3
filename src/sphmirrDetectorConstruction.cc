@@ -100,7 +100,7 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     constexpr G4double mirror_r_max = 1106.0 * mm;
     constexpr G4double mirror_thickness = 10.0 * mm; // back surface offset (optically irrelevant)
     // Safety: c^2 * r_max^2 = 0.447 < 1.0, sqrt argument always positive
-    constexpr int mirror_n_steps = 1106;
+    constexpr int mirror_n_steps = 100;
     constexpr G4double mirror_dr = mirror_r_max / mirror_n_steps;
 
     auto mirrorSag = [&](G4double r) -> G4double {
