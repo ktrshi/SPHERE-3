@@ -225,8 +225,8 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
     auto *cam_hood = new G4Tubs("Hood", hood_r, hood_R, hood_hz,
                                 0.0, 6.283185307179586 * rad);
     hood_log = new G4LogicalVolume(cam_hood, Al, "Hood");
-    constexpr G4double mirror_edge_R = 1106.0 * mm;   // from STL bounding box
-    constexpr G4double mirror_rim_z = 1353.4 * mm;    // reflecting surface z at rim (from STL)
+    constexpr G4double mirror_edge_R = 1106.0 * mm;
+    constexpr G4double mirror_rim_z = 1353.4 * mm;    // EVENASPH z(1106)+sphmirr_z = 1353.446mm, delta=0.046mm
     G4double hood_n_hz = mirror_rim_z / 2.0;
     auto cam_hood_n = new G4Cons("hood_n",
         hood_R - 0.01*mm, hood_R,
