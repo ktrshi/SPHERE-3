@@ -1,5 +1,6 @@
 #include <G4VisExtent.hh>
 #include <G4Cons.hh>
+#include <G4GenericPolycone.hh>
 #include <memory>
 #include "sphmirrDetectorConstruction.hh"
 #include "G4Material.hh"
@@ -82,9 +83,66 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
             = new G4LogicalVolume(expHall_sph, Air, "World");
     expHall_phys
             = new G4PVPlacement(nullptr, G4ThreeVector(), expHall_log, "World", nullptr, false, 0);
-// The Mirror
-    auto mesh = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/mirror_test.stl");
-    auto SphMirr = mesh->GetSolid();
+// The Mirror — analytical EVENASPH surface (Zemax Configuration A, R=1654mm)
+    // EVENASPH: z(r) = c*r^2/(1+sqrt(1-(1+k)*c^2*r^2)) + sum(alpha_i * r^(2i))
+    // k=0 for this prescription, so (1+k)=1
+    constexpr G4double mirror_curv = -6.045949214026601900e-4; // mm^-1, R=1654mm
+    constexpr G4double mirror_alpha[8] = {
+        +1.02196065e-5,   // r^2
+        +1.15244950e-11,  // r^4
+        -2.00781727e-18,  // r^6
+        -8.77201898e-24,  // r^8
+        +1.79536598e-29,  // r^10
+        -1.40758850e-35,  // r^12
+        +5.28735920e-42,  // r^14
+        -7.79178450e-49   // r^16
+    };
+    constexpr G4double mirror_r_max = 1106.0 * mm;
+    constexpr G4double mirror_thickness = 10.0 * mm; // back surface offset (optically irrelevant)
+    // Safety: c^2 * r_max^2 = 0.447 < 1.0, sqrt argument always positive
+    constexpr int mirror_n_steps = 1106;
+    constexpr G4double mirror_dr = mirror_r_max / mirror_n_steps;
+
+    auto mirrorSag = [&](G4double r) -> G4double {
+        const G4double r2 = r * r;
+        const G4double cr2 = mirror_curv * r2;
+        G4double zz = cr2 / (1.0 + std::sqrt(1.0 - mirror_curv * mirror_curv * r2));
+        G4double rp = r2;
+        for (int i = 0; i < 8; ++i) {
+            zz += mirror_alpha[i] * rp;
+            rp *= r2;
+        }
+        return zz;
+    };
+
+    // Log max discretization error
+    {
+        G4double maxErr = 0.0;
+        for (int i = 0; i < mirror_n_steps; ++i) {
+            G4double r_mid = (i + 0.5) * mirror_dr;
+            G4double z_true = mirrorSag(r_mid);
+            G4double z_linear = 0.5 * (mirrorSag(i * mirror_dr) + mirrorSag((i + 1) * mirror_dr));
+            maxErr = std::max(maxErr, std::abs(z_true - z_linear));
+        }
+        G4cout << "Mirror polycone max discretization error: " << maxErr / um << " um" << G4endl;
+    }
+
+    // Build closed (r, z) profile: back surface outward, then front surface inward
+    const int n_profile = 2 * (mirror_n_steps + 1);
+    std::vector<G4double> mirror_r(n_profile), mirror_z(n_profile);
+    for (int i = 0; i <= mirror_n_steps; ++i) {
+        G4double r = i * mirror_dr;
+        mirror_r[i] = r;
+        mirror_z[i] = mirrorSag(r) - mirror_thickness;
+    }
+    for (int i = 0; i <= mirror_n_steps; ++i) {
+        G4double r = (mirror_n_steps - i) * mirror_dr;
+        mirror_r[mirror_n_steps + 1 + i] = r;
+        mirror_z[mirror_n_steps + 1 + i] = mirrorSag(r);
+    }
+
+    auto *SphMirr = new G4GenericPolycone("Mirror", 0.0, CLHEP::twopi,
+                                          n_profile, mirror_r.data(), mirror_z.data());
     sphmirr_log = new G4LogicalVolume(SphMirr, Al, "Mirror");
     sphmirr_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, sphmirr_z),
                                      sphmirr_log, "Mirror", expHall_log, false, 0);
