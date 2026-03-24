@@ -23,7 +23,6 @@
 #include "G4VisAttributes.hh"
 #include "G4Colour.hh"
 #include "G4SystemOfUnits.hh"
-#include "CADMesh.hh"
 
 extern G4String AbsolutePath;
 static std::ifstream pixel_data;
@@ -234,10 +233,65 @@ G4VPhysicalVolume *sphmirrDetectorConstruction::Construct() {
         hood_n_hz, 0.0, 2 * M_PI * rad);
     auto hood_n_log = new G4LogicalVolume(cam_hood_n, Al, "Hood_n");
     [[maybe_unused]] auto hood_n_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, hood_n_hz), hood_n_log, "Hood_n", expHall_log, false, 0);
-// Corrector
-    auto mesh_ = CADMesh::TessellatedMesh::FromSTL(AbsolutePath + "/configs/corrector_A-.stl");
-    auto corout = mesh_->GetSolid();
-    cor_log = new G4LogicalVolume(corout, Acrylyl, "Corrector");
+// Corrector — analytical EVENASPH surface (Zemax Configuration A, SURF 3)
+    // EVENASPH with CURV=0: z(r) = sum(alpha_i * r^(2i)), pure polynomial
+    constexpr G4double cor_alpha[8] = {
+        -9.45444322e-5,   // r^2
+        +5.61720565e-11,  // r^4
+        +3.66970589e-17,  // r^6
+        -7.87699703e-23,  // r^8
+        +2.77181769e-28,  // r^10
+        -4.02397883e-34,  // r^12
+        +3.18966763e-40,  // r^14
+        -8.49480030e-47   // r^16
+    };
+    constexpr G4double cor_r_max = 850.0 * mm;
+    constexpr G4double cor_thickness = 30.0 * mm; // center thickness (Zemax DISZ)
+    constexpr int cor_n_steps = 100;
+    constexpr G4double cor_dr = cor_r_max / cor_n_steps;
+
+    auto correctorSag = [&](G4double r) -> G4double {
+        const G4double r2 = r * r;
+        G4double z = 0.0;
+        G4double rp = r2;
+        for (int i = 0; i < 8; ++i) {
+            z += cor_alpha[i] * rp;
+            rp *= r2;
+        }
+        return z;
+    };
+
+    // Log max discretization error
+    {
+        G4double maxErr = 0.0;
+        for (int i = 0; i < cor_n_steps; ++i) {
+            G4double r_mid = (i + 0.5) * cor_dr;
+            G4double z_true = correctorSag(r_mid);
+            G4double z_linear = 0.5 * (correctorSag(i * cor_dr) + correctorSag((i + 1) * cor_dr));
+            maxErr = std::max(maxErr, std::abs(z_true - z_linear));
+        }
+        G4cout << "Corrector polycone max discretization error: " << maxErr / um << " um" << G4endl;
+    }
+
+    // Build closed (r, z) profile: flat bottom outward, then shaped top inward
+    // Bottom surface: flat at z=0
+    // Top surface: z = cor_thickness + correctorSag(r)
+    const int cor_n_profile = 2 * (cor_n_steps + 1);
+    std::vector<G4double> cor_r(cor_n_profile), cor_z(cor_n_profile);
+    for (int i = 0; i <= cor_n_steps; ++i) {
+        G4double r = i * cor_dr;
+        cor_r[i] = r;
+        cor_z[i] = 0.0; // flat bottom
+    }
+    for (int i = 0; i <= cor_n_steps; ++i) {
+        G4double r = (cor_n_steps - i) * cor_dr;
+        cor_r[cor_n_steps + 1 + i] = r;
+        cor_z[cor_n_steps + 1 + i] = cor_thickness + correctorSag(r);
+    }
+
+    auto *CorrSolid = new G4GenericPolycone("Corrector", 0.0, CLHEP::twopi,
+                                             cor_n_profile, cor_r.data(), cor_z.data());
+    cor_log = new G4LogicalVolume(CorrSolid, Acrylyl, "Corrector");
     cor_phys = new G4PVPlacement(nullptr, G4ThreeVector(0.0, 0.0, 0),
                                  cor_log, "Corrector", expHall_log, false, 0);
     auto pos1 = G4ThreeVector(0.0 * cm, 0.0 * cm, 0);
