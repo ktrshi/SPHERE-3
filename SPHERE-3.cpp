@@ -6,6 +6,7 @@
 #include "sphmirrPhysicsList.hh"
 #include "sphmirrDetectorConstruction.hh"
 #include "sphmirrActionInitialization.hh"
+#include "BackgroundOperator.hh"
 #include "FileQueue.hh"
 #include "SimConfig.hh"
 #include "ini.h"
@@ -23,6 +24,7 @@ int main(int argc, char** argv) {
     std::string currentPath;
     std::string cliPhelsDir;
     std::string cliMoshitsDir;
+    std::string cliBackgroundOperator;
     std::string cliThreads;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -32,6 +34,8 @@ int main(int argc, char** argv) {
             cliPhelsDir = argv[++i];
         } else if (arg == "--moshits" && i + 1 < argc) {
             cliMoshitsDir = argv[++i];
+        } else if (arg == "--background-operator" && i + 1 < argc) {
+            cliBackgroundOperator = argv[++i];
         } else if (arg == "--threads" && i + 1 < argc) {
             cliThreads = argv[++i];
         } else if (currentPath.empty()) {
@@ -64,6 +68,12 @@ int main(int argc, char** argv) {
     config->currentPath = currentPath;
     config->phelsDir = cliPhelsDir.empty() ? currentPath + "/phels" : cliPhelsDir;
     config->outputDir = cliMoshitsDir.empty() ? currentPath + "/moshits" : cliMoshitsDir;
+    if (!cliBackgroundOperator.empty()) {
+        config->backgroundOperator =
+            std::make_shared<BackgroundOperator>(read_background_operator(cliBackgroundOperator));
+        config->fastBackgroundEnabled = true;
+        G4cout << "Loaded background operator from " << cliBackgroundOperator << G4endl;
+    }
 
     // Build FileQueue from phels directory (skip in vis mode if dir missing)
     auto* fileQueue = new FileQueue();

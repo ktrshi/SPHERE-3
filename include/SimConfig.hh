@@ -2,7 +2,10 @@
 #define SimConfig_hh
 
 #include "globals.hh"
+#include <memory>
 #include <string>
+
+struct BackgroundOperator;
 
 /// Read-only simulation configuration. Created once in main(),
 /// passed as const pointer to all Action classes via ActionInitialization.
@@ -18,6 +21,10 @@ struct SimConfig {
     std::string currentPath;
     std::string phelsDir;
     std::string outputDir;
+
+    // Optional detector-level background operator.
+    bool fastBackgroundEnabled{false};
+    std::shared_ptr<const BackgroundOperator> backgroundOperator;
 };
 
 #endif

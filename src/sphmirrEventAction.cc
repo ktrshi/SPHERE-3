@@ -1,4 +1,5 @@
 #include "sphmirrEventAction.hh"
+#include "FastBackgroundSampler.hh"
 #include "WorkerEventData.hh"
 #include "SimConfig.hh"
 #include "G4Event.hh"
@@ -26,6 +27,12 @@ void EventAction::EndOfEventAction(const G4Event* event) {
     std::string outFile = fConfig->outputDir + "/moshits_" +
                           fEventData->inputFileSuffix + ".moshit.zst";
     try {
+        if (fConfig->fastBackgroundEnabled && fConfig->backgroundOperator) {
+            FastBackgroundSampler sampler(
+                fConfig->backgroundOperator,
+                static_cast<uint32_t>(event->GetEventID()) + 0x9e3779b9u);
+            sampler.SampleInto(fEventData->moshitWriter);
+        }
         fEventData->moshitWriter.Flush(outFile);
     } catch (const std::runtime_error& e) {
         G4cerr << "MoshitWriter error: " << e.what() << G4endl;

@@ -82,6 +82,18 @@ add_executable(compare_moshits
 target_include_directories(compare_moshits PRIVATE ${ZSTD_INCLUDE})
 target_link_libraries(compare_moshits ${Geant4_LIBRARIES} ${ZSTD_LIB})
 
+add_executable(test_fast_background_sampler
+    test_fast_background_sampler.cpp
+    src/MoshitWriter.cc
+    src/MoshitReader.cc
+    src/BackgroundOperator.cc
+    src/FastBackgroundSampler.cc)
+target_include_directories(test_fast_background_sampler PRIVATE ${ZSTD_INCLUDE})
+target_link_libraries(test_fast_background_sampler ${Geant4_LIBRARIES} ${ZSTD_LIB})
+if(BUILD_TESTING)
+    add_test(NAME test_fast_background_sampler COMMAND test_fast_background_sampler)
+endif()
+
 set(SPHERE-3_SCRIPTS
         init_vis.mac
         vis.mac

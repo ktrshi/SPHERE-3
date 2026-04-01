@@ -110,6 +110,13 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
         return;
     }
 
+    if (fConfig->fastBackgroundEnabled && fCurrentEvent.has_background) {
+        G4Exception("sphmirrPrimaryGeneratorAction",
+                    "FastBackgroundDoubleInject",
+                    FatalException,
+                    "Input PHEL already contains background photons; do not combine it with --background-operator");
+    }
+
     // Extract header data
     fEventData->zz  = fCurrentEvent.zz;
     fEventData->xsh = fCurrentEvent.xsh;
