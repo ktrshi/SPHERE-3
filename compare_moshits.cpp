@@ -30,13 +30,15 @@ struct Stats {
 
 Stats collect(const std::filesystem::path& root) {
     Stats out;
-    for (const auto& entry : std::filesystem::directory_iterator(root)) {
+    size_t consumed_files = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
         if (!entry.is_regular_file()) {
             continue;
         }
         if (!has_moshit_suffix(entry.path())) {
             continue;
         }
+        consumed_files += 1;
         const MoshitFile mf = MoshitReader::Read(entry.path().string());
         for (size_t idx = 0; idx < mf.hits.size(); ++idx) {
             const auto& hit = mf.hits[idx];
@@ -51,6 +53,9 @@ Stats collect(const std::filesystem::path& root) {
             out.total_hits += 1;
             out.per_pixel[hit.pixel] += 1;
         }
+    }
+    if (consumed_files == 0) {
+        throw std::runtime_error("No .moshit.zst files found under " + root.string());
     }
     return out;
 }

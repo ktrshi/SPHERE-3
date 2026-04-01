@@ -94,6 +94,18 @@ if(BUILD_TESTING)
     add_test(NAME test_fast_background_sampler COMMAND test_fast_background_sampler)
 endif()
 
+add_executable(test_background_calibration
+    test_background_calibration.cpp
+    src/MoshitWriter.cc
+    src/MoshitReader.cc
+    src/BackgroundOperator.cc
+    src/FastBackgroundSampler.cc)
+target_include_directories(test_background_calibration PRIVATE ${ZSTD_INCLUDE})
+target_link_libraries(test_background_calibration ${Geant4_LIBRARIES} ${ZSTD_LIB})
+if(BUILD_TESTING)
+    add_test(NAME test_background_calibration COMMAND test_background_calibration)
+endif()
+
 set(SPHERE-3_SCRIPTS
         init_vis.mac
         vis.mac

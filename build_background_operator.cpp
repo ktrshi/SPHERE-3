@@ -85,8 +85,9 @@ int main(int argc, char** argv) {
         op.neighbor_fire_prob.assign(kBackgroundPixels * kBackgroundNeighborSlots, 0.0f);
 
         std::vector<float> seed_counts(kBackgroundPixels, 0.0f);
+        size_t consumed_files = 0;
 
-        for (const auto& entry : std::filesystem::directory_iterator(root)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(root)) {
             if (!entry.is_regular_file()) {
                 continue;
             }
@@ -94,51 +95,91 @@ int main(int argc, char** argv) {
                 continue;
             }
 
+            consumed_files += 1;
             const MoshitFile mf = MoshitReader::Read(entry.path().string());
             for (size_t idx = 0; idx < mf.hits.size(); ++idx) {
                 validate_pixel_or_throw(mf.hits[idx].pixel, entry.path(), idx);
             }
 
-            for (const auto& hit : mf.hits) {
-                if (hit.origin != 2) {
-                    continue;
+            std::vector<size_t> background_indices;
+            background_indices.reserve(mf.hits.size());
+            for (size_t idx = 0; idx < mf.hits.size(); ++idx) {
+                if (mf.hits[idx].origin == 2) {
+                    background_indices.push_back(idx);
                 }
-                op.pixel_rate_per_event[hit.pixel] += 1.0f;
-                seed_counts[hit.pixel] += 1.0f;
-
-                const int bin = std::clamp(
-                    static_cast<int>(hit.t / window_ns * static_cast<float>(kBackgroundTimeBins)),
-                    0,
-                    static_cast<int>(kBackgroundTimeBins) - 1);
-                op.pixel_time_cdf[static_cast<size_t>(hit.pixel) * kBackgroundTimeBins + bin] += 1.0f;
             }
 
-            for (size_t i = 0; i < mf.hits.size(); ++i) {
-                if (mf.hits[i].origin != 2) {
-                    continue;
+            std::sort(background_indices.begin(), background_indices.end(),
+                      [&](size_t lhs, size_t rhs) {
+                          const auto& a = mf.hits[lhs];
+                          const auto& b = mf.hits[rhs];
+                          const int cluster_a = cluster_of(a.pixel);
+                          const int cluster_b = cluster_of(b.pixel);
+                          if (cluster_a != cluster_b) {
+                              return cluster_a < cluster_b;
+                          }
+                          if (a.t != b.t) {
+                              return a.t < b.t;
+                          }
+                          return a.pixel < b.pixel;
+                      });
+
+            size_t cursor = 0;
+            while (cursor < background_indices.size()) {
+                const auto& first_hit = mf.hits[background_indices[cursor]];
+                const int group_cluster = cluster_of(first_hit.pixel);
+                const float group_time = first_hit.t;
+                size_t group_end = cursor + 1;
+                while (group_end < background_indices.size()) {
+                    const auto& candidate = mf.hits[background_indices[group_end]];
+                    if (cluster_of(candidate.pixel) != group_cluster) {
+                        break;
+                    }
+                    if (std::fabs(candidate.t - group_time) > 5.0f) {
+                        break;
+                    }
+                    ++group_end;
                 }
-                std::array<bool, kBackgroundNeighborSlots> slot_seen{};
-                for (size_t j = 0; j < mf.hits.size(); ++j) {
-                    if (i == j) {
-                        continue;
-                    }
-                    if (mf.hits[j].origin != 2) {
-                        continue;
-                    }
-                    if (std::fabs(mf.hits[i].t - mf.hits[j].t) > 5.0f) {
-                        continue;
-                    }
-                    const int slot = relative_slot(mf.hits[i].pixel, mf.hits[j].pixel);
-                    if (slot >= 0 && slot < kBackgroundNeighborSlots) {
-                        if (!slot_seen[static_cast<size_t>(slot)]) {
-                            slot_seen[static_cast<size_t>(slot)] = true;
-                            op.neighbor_fire_prob[static_cast<size_t>(mf.hits[i].pixel) *
-                                                      kBackgroundNeighborSlots +
-                                                  static_cast<size_t>(slot)] += 1.0f;
+
+                const float weight = 1.0f / static_cast<float>(group_end - cursor);
+                for (size_t group_idx = cursor; group_idx < group_end; ++group_idx) {
+                    const auto& hit = mf.hits[background_indices[group_idx]];
+                    op.pixel_rate_per_event[hit.pixel] += weight;
+                    seed_counts[hit.pixel] += weight;
+
+                    const int bin = std::clamp(
+                        static_cast<int>(hit.t / window_ns * static_cast<float>(kBackgroundTimeBins)),
+                        0,
+                        static_cast<int>(kBackgroundTimeBins) - 1);
+                    op.pixel_time_cdf[static_cast<size_t>(hit.pixel) * kBackgroundTimeBins + bin] += weight;
+                }
+
+                for (size_t group_idx = cursor; group_idx < group_end; ++group_idx) {
+                    const auto& hit = mf.hits[background_indices[group_idx]];
+                    std::array<bool, kBackgroundNeighborSlots> slot_seen{};
+                    for (size_t other_idx = cursor; other_idx < group_end; ++other_idx) {
+                        if (group_idx == other_idx) {
+                            continue;
+                        }
+                        const auto& other_hit = mf.hits[background_indices[other_idx]];
+                        const int slot = relative_slot(hit.pixel, other_hit.pixel);
+                        if (slot >= 0 && slot < kBackgroundNeighborSlots) {
+                            if (!slot_seen[static_cast<size_t>(slot)]) {
+                                slot_seen[static_cast<size_t>(slot)] = true;
+                                op.neighbor_fire_prob[static_cast<size_t>(hit.pixel) *
+                                                          kBackgroundNeighborSlots +
+                                                      static_cast<size_t>(slot)] += weight;
+                            }
                         }
                     }
                 }
+
+                cursor = group_end;
             }
+        }
+
+        if (consumed_files == 0) {
+            throw std::runtime_error("No .moshit.zst files found under " + root.string());
         }
 
         for (int p = 0; p < kBackgroundPixels; ++p) {
