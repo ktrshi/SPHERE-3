@@ -13,11 +13,23 @@ MoshitFile MoshitReader::Read(const std::string& filename) {
         throw std::runtime_error("MoshitReader: cannot open " + filename);
     }
 
-    const auto compressed_size = static_cast<size_t>(ifs.tellg());
-    ifs.seekg(0);
+    const std::streampos end_pos = ifs.tellg();
+    if (end_pos < 0) {
+        throw std::runtime_error("MoshitReader: failed to determine file size for " + filename);
+    }
+    const size_t compressed_size = static_cast<size_t>(end_pos);
+    ifs.seekg(0, std::ios::beg);
+    if (!ifs) {
+        throw std::runtime_error("MoshitReader: failed to seek file " + filename);
+    }
 
     std::vector<char> compressed(compressed_size);
-    ifs.read(compressed.data(), static_cast<std::streamsize>(compressed_size));
+    if (compressed_size > 0) {
+        ifs.read(compressed.data(), static_cast<std::streamsize>(compressed_size));
+        if (!ifs) {
+            throw std::runtime_error("MoshitReader: failed to read compressed data from " + filename);
+        }
+    }
     ifs.close();
 
     const unsigned long long decompressed_size_ull =

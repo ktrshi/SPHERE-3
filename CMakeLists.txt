@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16...3.21)
 project(SPHERE-3)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+include(CTest)
 
 # Optimized compiler flags for maximum performance
 # -O3: Aggressive optimizations including loop vectorization
@@ -64,6 +65,9 @@ add_executable(test_background_operator
     src/BackgroundOperator.cc)
 target_include_directories(test_background_operator PRIVATE ${ZSTD_INCLUDE})
 target_link_libraries(test_background_operator ${Geant4_LIBRARIES} ${ZSTD_LIB})
+if(BUILD_TESTING)
+    add_test(NAME test_background_operator COMMAND test_background_operator)
+endif()
 
 set(SPHERE-3_SCRIPTS
         init_vis.mac

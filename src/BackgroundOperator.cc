@@ -16,10 +16,23 @@ std::vector<char> read_file_bytes(const std::string& path) {
         throw std::runtime_error("BackgroundOperator: cannot open " + path);
     }
 
-    const auto size = static_cast<size_t>(ifs.tellg());
-    ifs.seekg(0);
+    const std::streampos end_pos = ifs.tellg();
+    if (end_pos < 0) {
+        throw std::runtime_error("BackgroundOperator: failed to determine file size for " + path);
+    }
+    const size_t size = static_cast<size_t>(end_pos);
+    ifs.seekg(0, std::ios::beg);
+    if (!ifs) {
+        throw std::runtime_error("BackgroundOperator: failed to seek file " + path);
+    }
+
     std::vector<char> data(size);
-    ifs.read(data.data(), static_cast<std::streamsize>(size));
+    if (size > 0) {
+        ifs.read(data.data(), static_cast<std::streamsize>(size));
+        if (!ifs) {
+            throw std::runtime_error("BackgroundOperator: failed to read file " + path);
+        }
+    }
     return data;
 }
 
@@ -29,6 +42,9 @@ void write_file_bytes(const std::string& path, const std::vector<char>& data) {
         throw std::runtime_error("BackgroundOperator: cannot open for write " + path);
     }
     ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
+    if (!ofs) {
+        throw std::runtime_error("BackgroundOperator: failed to write file " + path);
+    }
 }
 
 std::vector<char> zstd_decompress(const std::vector<char>& compressed, const std::string& path) {
