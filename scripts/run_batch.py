@@ -74,7 +74,8 @@ def update_progress(tsv_path: Path, rel_path: str, status: str):
 
 
 def run_one(phels_dir: Path, moshits_root: Path, sphere_bin: Path,
-            logs_dir: Path, progress_tsv: Path, phels_root: Path) -> tuple[str, bool]:
+            logs_dir: Path, progress_tsv: Path, phels_root: Path,
+            background_operator: Path | None) -> tuple[str, bool]:
     """Process one phels directory. Returns (rel_path, success)."""
     rel_path = str(phels_dir.relative_to(phels_root))
     moshits_dir = moshits_root / rel_path
@@ -93,6 +94,8 @@ def run_one(phels_dir: Path, moshits_root: Path, sphere_bin: Path,
         "--moshits", str(moshits_dir),
         "--threads", "1",
     ]
+    if background_operator is not None:
+        cmd.extend(["--background-operator", str(background_operator)])
 
     try:
         with open(log_file, "w") as lf:
@@ -112,6 +115,7 @@ def main():
     parser.add_argument("--phels-root", type=Path, default=Path.home() / "sphall" / "phels")
     parser.add_argument("--moshits-root", type=Path, default=Path.home() / "sphall" / "moshits")
     parser.add_argument("--sphere-bin", type=Path, default=DEFAULT_SPHERE_BIN)
+    parser.add_argument("--background-operator", type=Path)
     parser.add_argument("--max-jobs", type=int, default=30)
     parser.add_argument("--particle", help="Filter by particle (e.g. 0014)")
     parser.add_argument("--energy", help="Filter by energy (e.g. 10PeV)")
@@ -156,7 +160,8 @@ def main():
     with ProcessPoolExecutor(max_workers=args.max_jobs) as pool:
         futures = {
             pool.submit(run_one, d, args.moshits_root, args.sphere_bin,
-                        logs_dir, progress_tsv, args.phels_root): d
+                        logs_dir, progress_tsv, args.phels_root,
+                        args.background_operator): d
             for d in pending
         }
         for future in as_completed(futures):
