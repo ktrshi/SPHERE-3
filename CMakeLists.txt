@@ -69,6 +69,19 @@ if(BUILD_TESTING)
     add_test(NAME test_background_operator COMMAND test_background_operator)
 endif()
 
+add_executable(build_background_operator
+    build_background_operator.cpp
+    src/MoshitReader.cc
+    src/BackgroundOperator.cc)
+target_include_directories(build_background_operator PRIVATE ${ZSTD_INCLUDE})
+target_link_libraries(build_background_operator ${Geant4_LIBRARIES} ${ZSTD_LIB})
+
+add_executable(compare_moshits
+    compare_moshits.cpp
+    src/MoshitReader.cc)
+target_include_directories(compare_moshits PRIVATE ${ZSTD_INCLUDE})
+target_link_libraries(compare_moshits ${Geant4_LIBRARIES} ${ZSTD_LIB})
+
 set(SPHERE-3_SCRIPTS
         init_vis.mac
         vis.mac
