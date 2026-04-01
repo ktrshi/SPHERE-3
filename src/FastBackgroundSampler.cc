@@ -10,6 +10,7 @@
 namespace {
 
 constexpr float kValidationEpsilon = 1e-5f;
+constexpr float kCompatibilityFloatTolerance = 1e-3f;
 
 int cluster_of(uint16_t pixel) {
     return static_cast<int>(pixel) / 7;
@@ -26,7 +27,13 @@ uint16_t neighbor_pixel_for_slot(uint16_t pixel, int neighbor_slot) {
     return static_cast<uint16_t>(cluster * 7 + neighbor_slot_in_cluster);
 }
 
-void validate_operator_or_throw(const BackgroundOperator& op) {
+bool nearly_equal(float lhs, float rhs, float tolerance = kCompatibilityFloatTolerance) {
+    return std::fabs(lhs - rhs) <= tolerance;
+}
+
+}  // namespace
+
+void ValidateBackgroundOperatorForSampling(const BackgroundOperator& op) {
     if (std::memcmp(op.header.magic, "BGOP", 4) != 0) {
         throw std::runtime_error("FastBackgroundSampler: operator has invalid magic");
     }
@@ -77,6 +84,9 @@ void validate_operator_or_throw(const BackgroundOperator& op) {
         if (rate > 0.0f && previous <= 0.0f) {
             throw std::runtime_error("FastBackgroundSampler: active pixels must have a non-empty time CDF");
         }
+        if (rate > 0.0f && std::fabs(previous - 1.0f) > kValidationEpsilon) {
+            throw std::runtime_error("FastBackgroundSampler: active pixel CDF must terminate at 1");
+        }
     }
 
     for (const float probability : op.neighbor_fire_prob) {
@@ -88,7 +98,25 @@ void validate_operator_or_throw(const BackgroundOperator& op) {
     }
 }
 
-}  // namespace
+std::string BackgroundOperatorCompatibilityError(const BackgroundOperator& op,
+                                                 uint16_t catm,
+                                                 float zz,
+                                                 float phi_deg,
+                                                 float the_deg) {
+    if (op.header.catm != catm) {
+        return "Background operator catm mismatch";
+    }
+    if (!nearly_equal(op.header.zz, zz)) {
+        return "Background operator zz mismatch";
+    }
+    if (!nearly_equal(op.header.phi, phi_deg)) {
+        return "Background operator phi mismatch";
+    }
+    if (!nearly_equal(op.header.the, the_deg)) {
+        return "Background operator the mismatch";
+    }
+    return {};
+}
 
 FastBackgroundSampler::FastBackgroundSampler(std::shared_ptr<const BackgroundOperator> op, uint32_t seed)
     : op_(std::move(op)), rng_(seed) {
@@ -96,7 +124,7 @@ FastBackgroundSampler::FastBackgroundSampler(std::shared_ptr<const BackgroundOpe
         throw std::runtime_error("FastBackgroundSampler: operator is null");
     }
 
-    validate_operator_or_throw(*op_);
+    ValidateBackgroundOperatorForSampling(*op_);
 
     pixel_cdf_.reserve(op_->pixel_rate_per_event.size());
     float running = 0.0f;
@@ -130,21 +158,26 @@ float FastBackgroundSampler::sample_time(uint16_t pixel) {
     return (static_cast<float>(bin_index) + uni_(rng_)) * bin_width_ns_;
 }
 
-void FastBackgroundSampler::SampleInto(MoshitWriter& writer) {
+FastBackgroundSampleStats FastBackgroundSampler::SampleInto(MoshitWriter& writer) {
+    FastBackgroundSampleStats stats;
+
     if (total_rate_ <= 0.0f) {
-        return;
+        return stats;
     }
 
     std::poisson_distribution<int> hit_count_distribution(total_rate_);
     const int hit_count = hit_count_distribution(rng_);
     if (hit_count <= 0) {
-        return;
+        return stats;
     }
 
     for (int hit_index = 0; hit_index < hit_count; ++hit_index) {
         const uint16_t pixel = sample_pixel();
         const float t = sample_time(pixel);
         writer.AddHit(pixel, t, 2, 0, 0, 0, t);
+        stats.injected_hits += 1;
+        stats.tmin_ns = std::min(stats.tmin_ns, t);
+        stats.tmax_ns = std::max(stats.tmax_ns, t);
 
         const size_t neighbor_base = static_cast<size_t>(pixel) * kBackgroundNeighborSlots;
         for (int neighbor_slot = 0; neighbor_slot < kBackgroundNeighborSlots; ++neighbor_slot) {
@@ -155,7 +188,12 @@ void FastBackgroundSampler::SampleInto(MoshitWriter& writer) {
             if (uni_(rng_) < std::min(probability, 1.0f)) {
                 const uint16_t neighbor_pixel = neighbor_pixel_for_slot(pixel, neighbor_slot);
                 writer.AddHit(neighbor_pixel, t, 2, 0, 0, 0, t);
+                stats.injected_hits += 1;
+                stats.tmin_ns = std::min(stats.tmin_ns, t);
+                stats.tmax_ns = std::max(stats.tmax_ns, t);
             }
         }
     }
+
+    return stats;
 }

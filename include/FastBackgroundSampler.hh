@@ -5,15 +5,32 @@
 #include "MoshitWriter.hh"
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <random>
+#include <string>
 #include <vector>
+
+struct FastBackgroundSampleStats {
+    uint32_t injected_hits{0};
+    float tmin_ns{std::numeric_limits<float>::max()};
+    float tmax_ns{-std::numeric_limits<float>::max()};
+
+    bool HasHits() const { return injected_hits > 0; }
+};
+
+void ValidateBackgroundOperatorForSampling(const BackgroundOperator& op);
+std::string BackgroundOperatorCompatibilityError(const BackgroundOperator& op,
+                                                 uint16_t catm,
+                                                 float zz,
+                                                 float phi_deg,
+                                                 float the_deg);
 
 class FastBackgroundSampler {
 public:
     FastBackgroundSampler(std::shared_ptr<const BackgroundOperator> op, uint32_t seed);
 
-    void SampleInto(MoshitWriter& writer);
+    FastBackgroundSampleStats SampleInto(MoshitWriter& writer);
 
 private:
     uint16_t sample_pixel();

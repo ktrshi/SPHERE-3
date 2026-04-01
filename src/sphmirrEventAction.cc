@@ -23,16 +23,34 @@ void EventAction::BeginOfEventAction(const G4Event*) {
 void EventAction::EndOfEventAction(const G4Event* event) {
     if (fEventData->inputFileSuffix.empty()) return;
 
+    if (fConfig->fastBackgroundEnabled && fConfig->backgroundOperator) {
+        try {
+            FastBackgroundSampler sampler(
+                fConfig->backgroundOperator,
+                static_cast<uint32_t>(event->GetEventID()) + 0x9e3779b9u);
+            const FastBackgroundSampleStats stats = sampler.SampleInto(fEventData->moshitWriter);
+            if (stats.HasHits()) {
+                fEventData->NEntry += static_cast<int>(stats.injected_hits);
+                const G4double sampled_tmin = static_cast<G4double>(stats.tmin_ns) * ns;
+                const G4double sampled_tmax = static_cast<G4double>(stats.tmax_ns) * ns;
+                if (fEventData->tmin > sampled_tmin) fEventData->tmin = sampled_tmin;
+                if (fEventData->tmax < sampled_tmax) fEventData->tmax = sampled_tmax;
+            }
+        } catch (const std::exception& e) {
+            const std::string message =
+                "Fast background sampling failed for event " +
+                std::to_string(event->GetEventID()) + ": " + e.what();
+            G4Exception("EventAction::EndOfEventAction",
+                        "FastBackgroundSamplingFailed",
+                        FatalException,
+                        message.c_str());
+        }
+    }
+
     // Flush compressed binary output
     std::string outFile = fConfig->outputDir + "/moshits_" +
                           fEventData->inputFileSuffix + ".moshit.zst";
     try {
-        if (fConfig->fastBackgroundEnabled && fConfig->backgroundOperator) {
-            FastBackgroundSampler sampler(
-                fConfig->backgroundOperator,
-                static_cast<uint32_t>(event->GetEventID()) + 0x9e3779b9u);
-            sampler.SampleInto(fEventData->moshitWriter);
-        }
         fEventData->moshitWriter.Flush(outFile);
     } catch (const std::runtime_error& e) {
         G4cerr << "MoshitWriter error: " << e.what() << G4endl;

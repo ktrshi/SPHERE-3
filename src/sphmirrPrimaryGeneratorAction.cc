@@ -1,5 +1,6 @@
 #include "sphmirrPrimaryGeneratorAction.hh"
 #include "FileQueue.hh"
+#include "FastBackgroundSampler.hh"
 #include "SimConfig.hh"
 #include "WorkerEventData.hh"
 #include "sphmirrDetectorConstruction.hh"
@@ -115,6 +116,30 @@ void sphmirrPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent) {
                     "FastBackgroundDoubleInject",
                     FatalException,
                     "Input PHEL already contains background photons; do not combine it with --background-operator");
+    }
+    if (fConfig->fastBackgroundEnabled && fConfig->backgroundOperator) {
+        const std::string compatibility_error = BackgroundOperatorCompatibilityError(
+            *fConfig->backgroundOperator,
+            fCurrentEvent.catm,
+            fCurrentEvent.zz,
+            static_cast<float>(fConfig->phi / deg),
+            static_cast<float>(fConfig->the / deg));
+        if (!compatibility_error.empty()) {
+            const std::string message =
+                compatibility_error +
+                "; operator(catm=" + std::to_string(fConfig->backgroundOperator->header.catm) +
+                ", zz=" + std::to_string(fConfig->backgroundOperator->header.zz) +
+                ", phi=" + std::to_string(fConfig->backgroundOperator->header.phi) +
+                ", the=" + std::to_string(fConfig->backgroundOperator->header.the) +
+                "), event/run(catm=" + std::to_string(fCurrentEvent.catm) +
+                ", zz=" + std::to_string(fCurrentEvent.zz) +
+                ", phi=" + std::to_string(static_cast<float>(fConfig->phi / deg)) +
+                ", the=" + std::to_string(static_cast<float>(fConfig->the / deg)) + ")";
+            G4Exception("sphmirrPrimaryGeneratorAction",
+                        "FastBackgroundOperatorMismatch",
+                        FatalException,
+                        message.c_str());
+        }
     }
 
     // Extract header data
