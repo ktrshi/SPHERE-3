@@ -3,12 +3,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -48,6 +50,31 @@ void validate_pixel_or_throw(uint16_t pixel,
                              " in " + file_path.string() +
                              " at hit #" + std::to_string(hit_index));
 }
+
+struct SourceKey {
+    uint16_t ii;
+    uint16_t jj;
+    uint8_t kk;
+    uint32_t t0_bits;
+
+    bool operator==(const SourceKey& other) const = default;
+};
+
+struct SourceKeyHash {
+    size_t operator()(const SourceKey& key) const {
+        size_t hash = static_cast<size_t>(key.ii);
+        hash = hash * 1315423911u + static_cast<size_t>(key.jj);
+        hash = hash * 1315423911u + static_cast<size_t>(key.kk);
+        hash = hash * 1315423911u + static_cast<size_t>(key.t0_bits);
+        return hash;
+    }
+};
+
+struct SourceGroup {
+    uint16_t seed_pixel;
+    float det_t;
+    std::array<bool, kBackgroundNeighborSlots> slot_seen{};
+};
 
 }  // namespace
 
@@ -101,80 +128,56 @@ int main(int argc, char** argv) {
                 validate_pixel_or_throw(mf.hits[idx].pixel, entry.path(), idx);
             }
 
-            std::vector<size_t> background_indices;
-            background_indices.reserve(mf.hits.size());
-            for (size_t idx = 0; idx < mf.hits.size(); ++idx) {
-                if (mf.hits[idx].origin == 2) {
-                    background_indices.push_back(idx);
+            std::unordered_map<SourceKey, SourceGroup, SourceKeyHash> groups;
+            groups.reserve(mf.hits.size());
+
+            for (const auto& hit : mf.hits) {
+                if (hit.origin != 2) {
+                    continue;
+                }
+
+                const SourceKey key{
+                    hit.ii,
+                    hit.jj,
+                    hit.kk,
+                    std::bit_cast<uint32_t>(hit.t0),
+                };
+
+                auto [it, inserted] = groups.emplace(
+                    key,
+                    SourceGroup{
+                        hit.pixel,
+                        hit.t,
+                    });
+                if (inserted) {
+                    continue;
+                }
+
+                const int slot = relative_slot(it->second.seed_pixel, hit.pixel);
+                if (slot >= 0 && slot < kBackgroundNeighborSlots) {
+                    it->second.slot_seen[static_cast<size_t>(slot)] = true;
                 }
             }
 
-            std::sort(background_indices.begin(), background_indices.end(),
-                      [&](size_t lhs, size_t rhs) {
-                          const auto& a = mf.hits[lhs];
-                          const auto& b = mf.hits[rhs];
-                          const int cluster_a = cluster_of(a.pixel);
-                          const int cluster_b = cluster_of(b.pixel);
-                          if (cluster_a != cluster_b) {
-                              return cluster_a < cluster_b;
-                          }
-                          if (a.t != b.t) {
-                              return a.t < b.t;
-                          }
-                          return a.pixel < b.pixel;
-                      });
+            for (const auto& [key, group] : groups) {
+                (void)key;
+                op.pixel_rate_per_event[group.seed_pixel] += 1.0f;
+                seed_counts[group.seed_pixel] += 1.0f;
 
-            size_t cursor = 0;
-            while (cursor < background_indices.size()) {
-                const auto& first_hit = mf.hits[background_indices[cursor]];
-                const int group_cluster = cluster_of(first_hit.pixel);
-                const float group_time = first_hit.t;
-                size_t group_end = cursor + 1;
-                while (group_end < background_indices.size()) {
-                    const auto& candidate = mf.hits[background_indices[group_end]];
-                    if (cluster_of(candidate.pixel) != group_cluster) {
-                        break;
+                const int bin = std::clamp(
+                    static_cast<int>(group.det_t / window_ns * static_cast<float>(kBackgroundTimeBins)),
+                    0,
+                    static_cast<int>(kBackgroundTimeBins) - 1);
+                op.pixel_time_cdf[static_cast<size_t>(group.seed_pixel) * kBackgroundTimeBins + bin] += 1.0f;
+
+                for (int slot = 0; slot < kBackgroundNeighborSlots; ++slot) {
+                    if (!group.slot_seen[static_cast<size_t>(slot)]) {
+                        continue;
                     }
-                    if (std::fabs(candidate.t - group_time) > 5.0f) {
-                        break;
-                    }
-                    ++group_end;
+                    op.neighbor_fire_prob[static_cast<size_t>(group.seed_pixel) *
+                                              kBackgroundNeighborSlots +
+                                          static_cast<size_t>(slot)] += 1.0f;
                 }
-
-                const float weight = 1.0f / static_cast<float>(group_end - cursor);
-                for (size_t group_idx = cursor; group_idx < group_end; ++group_idx) {
-                    const auto& hit = mf.hits[background_indices[group_idx]];
-                    op.pixel_rate_per_event[hit.pixel] += weight;
-                    seed_counts[hit.pixel] += weight;
-
-                    const int bin = std::clamp(
-                        static_cast<int>(hit.t / window_ns * static_cast<float>(kBackgroundTimeBins)),
-                        0,
-                        static_cast<int>(kBackgroundTimeBins) - 1);
-                    op.pixel_time_cdf[static_cast<size_t>(hit.pixel) * kBackgroundTimeBins + bin] += weight;
-                }
-
-                for (size_t group_idx = cursor; group_idx < group_end; ++group_idx) {
-                    const auto& hit = mf.hits[background_indices[group_idx]];
-                    std::array<bool, kBackgroundNeighborSlots> slot_seen{};
-                    for (size_t other_idx = cursor; other_idx < group_end; ++other_idx) {
-                        if (group_idx == other_idx) {
-                            continue;
-                        }
-                        const auto& other_hit = mf.hits[background_indices[other_idx]];
-                        const int slot = relative_slot(hit.pixel, other_hit.pixel);
-                        if (slot >= 0 && slot < kBackgroundNeighborSlots) {
-                            if (!slot_seen[static_cast<size_t>(slot)]) {
-                                slot_seen[static_cast<size_t>(slot)] = true;
-                                op.neighbor_fire_prob[static_cast<size_t>(hit.pixel) *
-                                                          kBackgroundNeighborSlots +
-                                                      static_cast<size_t>(slot)] += weight;
-                            }
-                        }
-                    }
-                }
-
-                cursor = group_end;
             }
         }
 

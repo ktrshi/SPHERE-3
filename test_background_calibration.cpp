@@ -101,6 +101,15 @@ std::filesystem::path make_temp_root() {
     return root;
 }
 
+struct SyntheticHit {
+    uint16_t pixel = 0;
+    uint16_t ii = 0;
+    uint16_t jj = 0;
+    uint8_t kk = 0;
+    float t_ns = 0.0f;
+    float t0_ns = 0.0f;
+};
+
 void write_event(const std::filesystem::path& path,
                  const std::vector<uint16_t>& pixels,
                  float t_ns) {
@@ -109,6 +118,17 @@ void write_event(const std::filesystem::path& path,
     writer.Begin(-1000.0f, 0.0f, 0.0f);
     for (const uint16_t pixel : pixels) {
         writer.AddHit(pixel, t_ns, 2, 0, 0, 0, t_ns);
+    }
+    writer.Flush(path.string());
+}
+
+void write_event_with_hits(const std::filesystem::path& path,
+                           const std::vector<SyntheticHit>& hits) {
+    std::filesystem::create_directories(path.parent_path());
+    MoshitWriter writer;
+    writer.Begin(-1000.0f, 0.0f, 0.0f);
+    for (const auto& hit : hits) {
+        writer.AddHit(hit.pixel, hit.t_ns, 2, hit.ii, hit.jj, hit.kk, hit.t0_ns);
     }
     writer.Flush(path.string());
 }
@@ -207,6 +227,47 @@ int main(int argc, char** argv) {
             check_or_fail(mean_hits > 6.0 && mean_hits < 8.5,
                           "round-trip mean hits/event should stay near the observed 7 hits, got " +
                               std::to_string(mean_hits),
+                          ok);
+        }
+
+        const std::filesystem::path split_sources_dir = temp_root / "split_sources_top_level";
+        std::filesystem::create_directories(split_sources_dir);
+        const std::vector<SyntheticHit> split_hits = {
+            {.pixel = 0, .ii = 10, .jj = 10, .kk = 3, .t_ns = 75.0f, .t0_ns = 50.0f},
+            {.pixel = 3, .ii = 20, .jj = 20, .kk = 3, .t_ns = 75.0f, .t0_ns = 50.0f},
+        };
+        for (int event_index = 0; event_index < 64; ++event_index) {
+            write_event_with_hits(split_sources_dir / ("split_" + std::to_string(event_index) + ".moshit.zst"),
+                                  split_hits);
+        }
+
+        const std::filesystem::path split_bgop = temp_root / "split.bgop.zst";
+        const CommandResult split_build = run_command({
+            build_bgop.string(),
+            split_sources_dir.string(),
+            split_bgop.string(),
+            "1",
+            "-1000",
+            "0",
+            "0",
+            "256",
+            "64",
+        });
+        check_or_fail(split_build.exit_code == 0,
+                      "build_background_operator failed for split-source calibration data:\n" +
+                          split_build.output,
+                      ok);
+        if (split_build.exit_code == 0) {
+            const BackgroundOperator split_op = read_background_operator(split_bgop.string());
+            const double split_mean_hits = sampled_mean_hits_per_event(split_op, 4000);
+            const double split_seed_rate = total_seed_rate(split_op);
+            check_or_fail(split_seed_rate > 1.8 && split_seed_rate < 2.2,
+                          "expected latent seed rate near 2 for two independent same-cluster sources, got " +
+                              std::to_string(split_seed_rate),
+                          ok);
+            check_or_fail(split_mean_hits > 1.6 && split_mean_hits < 2.4,
+                          "round-trip mean hits/event should stay near 2 for split sources, got " +
+                              std::to_string(split_mean_hits),
                           ok);
         }
 
