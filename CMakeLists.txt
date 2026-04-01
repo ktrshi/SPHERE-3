@@ -57,6 +57,14 @@ set_property(TARGET SPHERE-3 PROPERTY CXX_EXTENSIONS OFF)
 target_include_directories(SPHERE-3 PRIVATE ${ZSTD_INCLUDE})
 target_link_libraries(SPHERE-3 ${Geant4_LIBRARIES} ${ZSTD_LIB})
 
+add_executable(test_background_operator
+    test_background_operator.cpp
+    src/MoshitWriter.cc
+    src/MoshitReader.cc
+    src/BackgroundOperator.cc)
+target_include_directories(test_background_operator PRIVATE ${ZSTD_INCLUDE})
+target_link_libraries(test_background_operator ${Geant4_LIBRARIES} ${ZSTD_LIB})
+
 set(SPHERE-3_SCRIPTS
         init_vis.mac
         vis.mac
