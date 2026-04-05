@@ -13,7 +13,6 @@ struct WorkerEventData;
 struct SimConfig;
 
 struct PixelNormalCache {
-    G4double inv_r;
     G4double u, v, w;
 };
 

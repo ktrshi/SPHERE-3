@@ -15,14 +15,7 @@ class sphmirrPhysicsList final: public G4VUserPhysicsList
         void ConstructParticle() override;
         void ConstructProcess() override;
         void SetCuts() override;
-        // Particle group constructors
         static void ConstructBosons();
-        static void ConstructLeptons();
-        static void ConstructMesons();
-        static void ConstructBaryons();
-        // Process constructors
-        void ConstructGeneral() const;
-        void ConstructEM() const;
         void ConstructOp();
         void SetVerbose(G4int) const;
 
